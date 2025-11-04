@@ -7,20 +7,17 @@ from instagrapi import Client
 
 app = Flask(__name__)
 
-# -------------------- GLOBAL VARIABLES --------------------
 BOT_THREAD = None
 STOP_EVENT = threading.Event()
 LOGS = []
 SESSION_FILE = "session.json"
 
 
-# -------------------- LOG FUNCTION --------------------
 def log(msg):
     LOGS.append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
     print(msg)
 
 
-# -------------------- BOT CORE --------------------
 def run_bot(username, password, welcome_messages, group_ids, delay, poll_interval):
     cl = Client()
     try:
@@ -61,7 +58,6 @@ def run_bot(username, password, welcome_messages, group_ids, delay, poll_interva
     log("🛑 Bot stopped.")
 
 
-# -------------------- FLASK ROUTES --------------------
 @app.route("/")
 def index():
     return render_template_string(PAGE_HTML)
@@ -103,7 +99,6 @@ def get_logs():
     return jsonify({"logs": LOGS[-200:]})
 
 
-# -------------------- FRONTEND (SIMPLE, FULLSCREEN HTML) --------------------
 PAGE_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -111,7 +106,7 @@ PAGE_HTML = """
 <meta charset="UTF-8">
 <title>INSTA MULTI WELCOME BOT</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap');
 
 * {
   box-sizing: border-box;
@@ -120,90 +115,119 @@ PAGE_HTML = """
 body {
   margin: 0;
   padding: 0;
-  font-family: 'Roboto', sans-serif;
-  background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+  font-family: 'Poppins', sans-serif;
+  background: radial-gradient(circle at top left, #0f2027, #203a43, #2c5364);
   color: #fff;
   display: flex;
   justify-content: center;
-  align-items: center;
+  align-items: flex-start;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 .container {
   width: 95%;
-  max-width: 1000px;
-  background: rgba(255, 255, 255, 0.05);
+  max-width: 800px;
+  background: rgba(255,255,255,0.05);
   border-radius: 20px;
-  padding: 40px;
-  box-shadow: 0 0 20px rgba(0,0,0,0.3);
+  padding: 35px 25px;
+  box-shadow: 0 0 25px rgba(0,0,0,0.4);
+  margin-top: 40px;
 }
 
 h1 {
   text-align: center;
   margin-bottom: 30px;
-  font-size: 32px;
+  color: #00eaff;
   letter-spacing: 1px;
+  font-size: 26px;
+  font-weight: 600;
 }
 
-form {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+label {
+  display: block;
+  margin-top: 15px;
+  margin-bottom: 5px;
+  color: #ccc;
+  font-size: 15px;
+}
+
+input, textarea, select {
   width: 100%;
-}
-
-input, textarea {
-  width: 90%;
-  max-width: 900px;
-  padding: 15px;
-  margin: 10px 0;
+  padding: 12px 15px;
   border: none;
   border-radius: 10px;
   background: rgba(255,255,255,0.1);
   color: #fff;
-  font-size: 16px;
+  font-size: 15px;
   outline: none;
 }
 
 textarea {
   resize: none;
-  height: 120px;
+  height: 100px;
 }
 
 button {
-  width: 200px;
-  margin: 15px 10px;
-  padding: 15px;
-  font-size: 16px;
   border: none;
-  border-radius: 10px;
-  background-color: #00bcd4;
-  color: #fff;
+  padding: 14px 25px;
+  font-size: 16px;
   font-weight: 600;
+  border-radius: 12px;
+  color: white;
+  margin: 10px;
   cursor: pointer;
   transition: 0.3s;
 }
+
+.start {
+  background: linear-gradient(135deg, #00c6ff, #0072ff);
+}
+.stop {
+  background: linear-gradient(135deg, #ff512f, #dd2476);
+}
+.sample {
+  background: linear-gradient(135deg, #43e97b, #38f9d7);
+}
 button:hover {
-  background-color: #0097a7;
+  transform: scale(1.05);
 }
 
 .buttons {
   display: flex;
   justify-content: center;
   flex-wrap: wrap;
+  margin-top: 15px;
 }
 
 .log-box {
-  margin-top: 30px;
-  width: 100%;
-  height: 300px;
-  background: rgba(0,0,0,0.4);
+  background: rgba(0,0,0,0.5);
   border-radius: 10px;
-  overflow-y: auto;
-  padding: 15px;
+  padding: 10px;
   font-size: 14px;
-  color: #c5e1e8;
-  border: 1px solid rgba(255,255,255,0.2);
+  height: 220px;
+  overflow-y: auto;
+  margin-top: 10px;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+h3 {
+  text-align: center;
+  margin-top: 20px;
+  color: #9ee7ff;
+  font-weight: 500;
+}
+
+@media (max-width: 600px) {
+  .container {
+    padding: 25px 15px;
+  }
+  h1 {
+    font-size: 22px;
+  }
+  button {
+    width: 100%;
+  }
 }
 </style>
 </head>
@@ -211,19 +235,33 @@ button:hover {
   <div class="container">
     <h1>INSTA MULTI WELCOME BOT</h1>
     <form id="botForm">
-      <input type="text" name="username" placeholder="Instagram Username" required>
-      <input type="password" name="password" placeholder="Password" required>
-      <textarea name="welcome" placeholder="Enter multiple welcome messages (each line = 1 message)" required></textarea>
-      <input type="text" name="group_ids" placeholder="Group Chat IDs (comma separated)" required>
-      <input type="number" name="delay" placeholder="Delay between messages (seconds)" value="3">
-      <input type="number" name="poll" placeholder="Poll interval (seconds)" value="10">
+      <label>Instagram Username</label>
+      <input type="text" name="username" placeholder="Enter Instagram Username">
+
+      <label>Password</label>
+      <input type="password" name="password" placeholder="Enter Password">
+
+      <label>Welcome Messages (each line = 1 message)</label>
+      <textarea name="welcome" placeholder="Enter multiple welcome messages here"></textarea>
+
+      <label>Group Chat IDs (comma separated)</label>
+      <input type="text" name="group_ids" placeholder="e.g. 24632887389663044,123456789">
+
+      <label>Delay between messages (seconds)</label>
+      <input type="number" name="delay" value="3">
+
+      <label>Poll interval (seconds)</label>
+      <input type="number" name="poll" value="10">
+
       <div class="buttons">
-        <button type="button" onclick="startBot()">Start Bot</button>
-        <button type="button" onclick="stopBot()">Stop Bot</button>
+        <button type="button" class="start" onclick="startBot()">Start Bot</button>
+        <button type="button" class="stop" onclick="stopBot()">Stop Bot</button>
+        <button type="button" class="sample" onclick="downloadSample()">Download Sample</button>
       </div>
     </form>
-    <h3 style="text-align:center;">Logs</h3>
-    <div class="log-box" id="logs"></div>
+
+    <h3>Logs</h3>
+    <div class="log-box" id="logs">No logs yet.</div>
   </div>
 
 <script>
@@ -233,25 +271,36 @@ async function startBot(){
   let data = await res.json();
   alert(data.message);
 }
+
 async function stopBot(){
   let res = await fetch('/stop', {method:'POST'});
   let data = await res.json();
   alert(data.message);
 }
+
 async function fetchLogs(){
   let res = await fetch('/logs');
   let data = await res.json();
   let box = document.getElementById('logs');
-  box.innerHTML = data.logs.join('<br>');
+  if(data.logs.length === 0) box.innerHTML = "No logs yet.";
+  else box.innerHTML = data.logs.join('<br>');
   box.scrollTop = box.scrollHeight;
 }
 setInterval(fetchLogs, 2000);
+
+function downloadSample(){
+  const text = "Welcome to the group!\\nGlad to have you here.\\nEnjoy chatting!";
+  const blob = new Blob([text], {type: 'text/plain'});
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'welcome_messages.txt';
+  link.click();
+}
 </script>
 </body>
 </html>
 """
 
-# -------------------- MAIN --------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
