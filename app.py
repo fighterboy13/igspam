@@ -40,9 +40,15 @@ def run_bot(username, password, welcome_messages, group_ids, delay, poll_interva
     while not STOP_EVENT.is_set():
         try:
             for gid in group_ids:
+                if STOP_EVENT.is_set():  # Check before each group
+                    break
+                    
                 try:
                     # Send ALL welcome messages continuously
                     for msg in welcome_messages:
+                        if STOP_EVENT.is_set():  # Check before each message
+                            break
+                            
                         # Add custom name/username to message
                         if custom_name:
                             final_msg = f"{custom_name} {msg}"
@@ -52,17 +58,33 @@ def run_bot(username, password, welcome_messages, group_ids, delay, poll_interva
                         cl.direct_send(final_msg, thread_ids=[gid])
                         message_count += 1
                         log(f"✅ [{message_count}] Sent: '{final_msg}' to group {gid}")
-                        time.sleep(delay)
+                        
+                        # Check stop during delay
+                        for _ in range(delay):
+                            if STOP_EVENT.is_set():
+                                break
+                            time.sleep(1)
+                        
+                        if STOP_EVENT.is_set():
+                            break
+                            
                 except Exception as e:
                     log(f"⚠️ Error in group {gid}: {e}")
             
-            # Poll interval between message cycles
+            if STOP_EVENT.is_set():
+                break
+            
+            # Poll interval between message cycles with stop check
             log(f"⏸️ Waiting {poll_interval} seconds before next message cycle...")
-            time.sleep(poll_interval)
+            for _ in range(poll_interval):
+                if STOP_EVENT.is_set():
+                    break
+                time.sleep(1)
+                
         except Exception as e:
             log(f"⚠️ Loop error: {e}")
 
-    log(f"🛑 Bot stopped. Total messages sent: {message_count}")
+    log(f"🛑 Bot stopped successfully. Total messages sent: {message_count}")
 
 
 @app.route("/")
@@ -89,7 +111,7 @@ def start_bot():
         return jsonify({"message": "⚠️ Please fill all required fields."})
 
     STOP_EVENT.clear()
-    BOT_THREAD = threading.Thread(target=run_bot, args=(username, password, welcome, group_ids, delay, poll, custom_name))
+    BOT_THREAD = threading.Thread(target=run_bot, args=(username, password, welcome, group_ids, delay, poll, custom_name), daemon=True)
     BOT_THREAD.start()
     log("🚀 Bot thread started.")
     return jsonify({"message": "✅ Bot started successfully! Messages sending 24x7..."})
@@ -97,9 +119,16 @@ def start_bot():
 
 @app.route("/stop", methods=["POST"])
 def stop_bot():
+    global BOT_THREAD
     STOP_EVENT.set()
-    log("🛑 Stop signal sent.")
-    return jsonify({"message": "🛑 Bot stopped."})
+    log("🛑 Stop signal sent. Stopping bot...")
+    
+    # Wait for thread to finish (max 5 seconds)
+    if BOT_THREAD:
+        BOT_THREAD.join(timeout=5)
+    
+    log("✅ Bot stopped completely.")
+    return jsonify({"message": "✅ Bot stopped successfully!"})
 
 
 @app.route("/logs")
@@ -433,7 +462,8 @@ h3 {
       <strong>🎯 24x7 CONTINUOUS WELCOME MODE 🎯</strong><br>
       ⚡ Bot will send welcome messages NON-STOP 24x7<br>
       ⚡ Messages will repeat continuously with your custom name/username<br>
-      ⚡ Perfect for continuous group promotion and engagement
+      ⚡ Perfect for continuous group promotion and engagement<br>
+      ⚡ <strong>STOP button now works instantly! 🛑</strong>
     </div>
 
     <div class="info-box">
@@ -441,7 +471,8 @@ h3 {
       • 📤 <strong>Multiple Messages:</strong> All messages sent continuously<br>
       • 👤 <strong>Custom Name/Username:</strong> Use any name or @username you want<br>
       • 📁 <strong>TXT File Upload:</strong> Upload welcome messages from a text file<br>
-      • ⏰ <strong>24x7 Mode:</strong> Messages keep sending with delay control
+      • ⏰ <strong>24x7 Mode:</strong> Messages keep sending with delay control<br>
+      • 🛑 <strong>Instant Stop:</strong> Bot stops immediately when you click stop
     </div>
 
     <form id="botForm">
