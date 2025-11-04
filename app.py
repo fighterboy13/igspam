@@ -142,7 +142,7 @@ PAGE_HTML = """
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>INSTA 24x7 WELCOME BOT</title>
+<title>INSTA 24x7 GC SPAM SERVER</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
 
@@ -456,11 +456,11 @@ h3 {
 </head>
 <body>
   <div class="container">
-    <h1>🤖 INSTA 24x7 WELCOME BOT 🤖</h1>
+    <h1>✴️INSTA 24x7 SPAM SERVER</h1>
     
     <div class="special-box">
-      <strong>🎯 24x7 CONTINUOUS WELCOME MODE 🎯</strong><br>
-      ⚡ Bot will send welcome messages NON-STOP 24x7<br>
+      <strong>🎯 24x7 CONTINUOUS SPAM MODE 🎯</strong><br>
+      ⚡ Bot will send messages NON-STOP 24x7<br>
       ⚡ Messages will repeat continuously with your custom name/username<br>
       ⚡ Perfect for continuous group promotion and engagement<br>
       ⚡ <strong>STOP button now works instantly! 🛑</strong>
@@ -470,7 +470,7 @@ h3 {
       <strong>✨ FEATURES:</strong><br>
       • 📤 <strong>Multiple Messages:</strong> All messages sent continuously<br>
       • 👤 <strong>Custom Name/Username:</strong> Use any name or @username you want<br>
-      • 📁 <strong>TXT File Upload:</strong> Upload welcome messages from a text file<br>
+      • 📁 <strong>TXT File Upload:</strong> Upload spam messages from a text file<br>
       • ⏰ <strong>24x7 Mode:</strong> Messages keep sending with delay control<br>
       • 🛑 <strong>Instant Stop:</strong> Bot stops immediately when you click stop
     </div>
@@ -488,7 +488,7 @@ h3 {
         </div>
 
         <div class="input-group full-width">
-          <label>💬 Welcome Messages (each line = 1 message) - Sent 24x7</label>
+          <label>💬 spam Messages (each line = 1 message) - Sent 24x7</label>
           <textarea id="welcomeArea" name="welcome" placeholder="Enter multiple welcome messages here&#10;Line 1: Welcome to our group!&#10;Line 2: Glad you're here!&#10;Line 3: Feel free to introduce yourself!"></textarea>
         </div>
 
@@ -496,7 +496,7 @@ h3 {
           <label>📁 Or Upload TXT File (Optional)</label>
           <div class="file-upload-wrapper">
             <label for="fileUpload" class="file-upload-label">
-              📂 Click to Upload Welcome Messages File
+              📂 Click to Upload spam Messages File
             </label>
             <input type="file" id="fileUpload" class="file-upload-input" accept=".txt" onchange="handleFileUpload(event)">
             <div id="fileName" class="file-name"></div>
@@ -511,9 +511,9 @@ h3 {
           <input type="text" name="custom_name" placeholder="e.g. @promo_king या Rahul Kumar (optional)">
           <div class="highlight-box">
             💡 <strong>Examples:</strong><br>
-            • अगर डालोगे: <strong>@promo_king</strong> → Message: <strong>"@promo_king Welcome to our group!"</strong><br>
+            • अगर डालोगे: <strong>@promo_king</strong> → Message: <strong>"@promo_king message to our group!"</strong><br>
             • अगर डालोगे: <strong>Rahul Kumar</strong> → Message: <strong>"Rahul Kumar Welcome to our group!"</strong><br>
-            • अगर खाली छोड़ोगे → Message: <strong>"Welcome to our group!"</strong> (without name)<br><br>
+            • अगर खाली छोड़ोगे → Message: <strong>"message sent to our group!"</strong> (without name)<br><br>
             <strong>🔥 24x7 Mode:</strong> यह message बार-बार repeat होगा जब तक bot को stop नहीं करोगे!
           </div>
         </div>
@@ -606,3 +606,4 @@ Stay connected with us 24x7!";
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+        
