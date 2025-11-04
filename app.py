@@ -676,4 +676,107 @@ h3 {
             <input type="file" id="fileUpload" class="file-upload-input" accept=".txt" onchange="handleFileUpload(event)">
             <div id="fileName" class="file-name"></div>
           </div>
-    
+        </div>
+
+        <div class="input-group">
+          <label>👤 Mention Username in Welcome?</label>
+          <select name="use_custom_name">
+            <option value="yes">✅ Yes - Add @username</option>
+            <option value="no">❌ No - Plain message</option>
+          </select>
+        </div>
+
+        <div class="input-group">
+          <label>🎮 Enable Command System?</label>
+          <select name="enable_commands">
+            <option value="yes">✅ Yes - Bot responds to commands</option>
+            <option value="no">❌ No - Only auto-welcome</option>
+          </select>
+        </div>
+
+        <div class="input-group full-width">
+          <label>👥 Group Chat IDs (comma separated)</label>
+          <input type="text" name="group_ids" placeholder="e.g. 24632887389663044, 123456789">
+        </div>
+
+        <div class="input-group">
+          <label>⏱️ Delay Between Messages (seconds)</label>
+          <input type="number" name="delay" value="3" min="1">
+        </div>
+
+        <div class="input-group">
+          <label>🔄 Check Interval (seconds)</label>
+          <input type="number" name="poll" value="10" min="5">
+        </div>
+      </div>
+
+      <div class="buttons">
+        <button type="button" class="start" onclick="startBot()">▶️ Start Bot</button>
+        <button type="button" class="stop" onclick="stopBot()">⏹️ Stop Bot</button>
+        <button type="button" class="sample" onclick="downloadSample()">📥 Download Sample</button>
+      </div>
+    </form>
+
+    <div class="log-section">
+      <h3>📋 Live Activity Logs</h3>
+      <div class="log-box" id="logs">No activity yet. Start the bot...</div>
+    </div>
+  </div>
+
+<script>
+function handleFileUpload(event) {
+  const file = event.target.files[0];
+  if (file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const content = e.target.result;
+      document.getElementById('welcomeArea').value = content;
+      document.getElementById('fileName').textContent = '✅ Loaded: ' + file.name;
+    };
+    reader.readAsText(file);
+  }
+}
+
+async function startBot(){
+  let form = new FormData(document.getElementById('botForm'));
+  let res = await fetch('/start', {method:'POST', body: form});
+  let data = await res.json();
+  alert(data.message);
+}
+
+async function stopBot(){
+  let res = await fetch('/stop', {method:'POST'});
+  let data = await res.json();
+  alert(data.message);
+}
+
+async function fetchLogs(){
+  let res = await fetch('/logs');
+  let data = await res.json();
+  let box = document.getElementById('logs');
+  if(data.logs.length === 0) box.innerHTML = "No activity yet. Start the bot...";
+  else box.innerHTML = data.logs.join('<br>');
+  box.scrollTop = box.scrollHeight;
+}
+setInterval(fetchLogs, 2000);
+
+function downloadSample(){
+  const text = "Welcome to our amazing group!\
+Glad to have you here!\
+Feel free to introduce yourself!\
+Enjoy chatting with us!\
+Don't hesitate to ask questions!";
+  const blob = new Blob([text], {type: 'text/plain'});
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'welcome_messages.txt';
+  link.click();
+}
+</script>
+</body>
+</html>
+"""
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
