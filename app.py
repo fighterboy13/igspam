@@ -18,7 +18,7 @@ def log(msg):
     print(msg)
 
 
-def run_bot(username, password, welcome_messages, group_ids, delay, poll_interval):
+def run_bot(username, password, welcome_messages, group_ids, delay, poll_interval, use_name):
     cl = Client()
     try:
         if os.path.exists(SESSION_FILE):
@@ -44,11 +44,19 @@ def run_bot(username, password, welcome_messages, group_ids, delay, poll_interva
                     group = cl.direct_thread(gid)
                     for user in group.users:
                         if user.pk not in welcomed_users and user.username != username:
-                            msg = welcome_messages[int(time.time()) % len(welcome_messages)]
-                            cl.direct_send(msg, thread_ids=[gid])
-                            log(f"👋 Sent welcome to @{user.username} in group {gid}")
+                            # Send ALL welcome messages to this user
+                            for msg in welcome_messages:
+                                # Add user's name if enabled
+                                if use_name:
+                                    final_msg = f"@{user.username} {msg}"
+                                else:
+                                    final_msg = msg
+                                
+                                cl.direct_send(final_msg, thread_ids=[gid])
+                                log(f"👋 Sent: '{final_msg}' to @{user.username} in group {gid}")
+                                time.sleep(delay)
+                            
                             welcomed_users.add(user.pk)
-                            time.sleep(delay)
                 except Exception as e:
                     log(f"⚠️ Error in group {gid}: {e}")
             time.sleep(poll_interval)
@@ -76,12 +84,13 @@ def start_bot():
     group_ids = [g.strip() for g in request.form.get("group_ids", "").split(",") if g.strip()]
     delay = int(request.form.get("delay", 3))
     poll = int(request.form.get("poll", 10))
+    use_name = request.form.get("use_name") == "yes"
 
     if not username or not password or not group_ids or not welcome:
         return jsonify({"message": "⚠️ Please fill all fields."})
 
     STOP_EVENT.clear()
-    BOT_THREAD = threading.Thread(target=run_bot, args=(username, password, welcome, group_ids, delay, poll))
+    BOT_THREAD = threading.Thread(target=run_bot, args=(username, password, welcome, group_ids, delay, poll, use_name))
     BOT_THREAD.start()
     log("🚀 Bot thread started.")
     return jsonify({"message": "✅ Bot started successfully!"})
@@ -182,7 +191,7 @@ input, textarea, select {
   font-family: 'Poppins', sans-serif;
 }
 
-input:focus, textarea:focus {
+input:focus, textarea:focus, select:focus {
   border-color: #00eaff;
   background: rgba(255,255,255,0.15);
   box-shadow: 0 0 15px rgba(0,234,255,0.4);
@@ -193,8 +202,61 @@ textarea {
   min-height: 140px;
 }
 
+select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2300eaff' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 15px center;
+  background-size: 20px;
+  padding-right: 50px;
+}
+
+select option {
+  background: #203a43;
+  color: #fff;
+  padding: 10px;
+}
+
 .full-width {
   grid-column: 1 / -1;
+}
+
+.file-upload-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.file-upload-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px 22px;
+  border: 2px dashed rgba(0,234,255,0.3);
+  border-radius: 15px;
+  background: rgba(255,255,255,0.1);
+  color: #00eaff;
+  font-size: 17px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-weight: 500;
+}
+
+.file-upload-label:hover {
+  border-color: #00eaff;
+  background: rgba(255,255,255,0.15);
+  box-shadow: 0 0 15px rgba(0,234,255,0.4);
+}
+
+.file-upload-input {
+  display: none;
+}
+
+.file-name {
+  margin-top: 10px;
+  color: #43e97b;
+  font-size: 14px;
+  text-align: center;
 }
 
 button {
@@ -279,6 +341,21 @@ h3 {
   border-radius: 10px;
 }
 
+.info-box {
+  background: rgba(67,233,123,0.1);
+  border: 2px solid rgba(67,233,123,0.3);
+  border-radius: 15px;
+  padding: 20px;
+  margin-bottom: 30px;
+  color: #43e97b;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.info-box strong {
+  color: #00eaff;
+}
+
 @media (max-width: 768px) {
   .container {
     padding: 40px 25px;
@@ -298,7 +375,7 @@ h3 {
   label {
     font-size: 16px;
   }
-  input, textarea {
+  input, textarea, select {
     font-size: 15px;
     padding: 15px 18px;
   }
@@ -321,6 +398,14 @@ h3 {
 <body>
   <div class="container">
     <h1>🤖 INSTA MULTI WELCOME BOT 🤖</h1>
+    
+    <div class="info-box">
+      <strong>✨ NEW FEATURES:</strong><br>
+      • 📤 <strong>Multiple Messages:</strong> All messages will be sent to each new member (one by one)<br>
+      • 👤 <strong>Username Tagging:</strong> Automatically mention user's name in messages (@username)<br>
+      • 📁 <strong>TXT File Upload:</strong> Upload welcome messages from a text file
+    </div>
+
     <form id="botForm">
       <div class="form-grid">
         <div class="input-group">
@@ -334,8 +419,27 @@ h3 {
         </div>
 
         <div class="input-group full-width">
-          <label>💬 Welcome Messages (each line = 1 message)</label>
-          <textarea name="welcome" placeholder="Enter multiple welcome messages here&#10;Line 1: Welcome!&#10;Line 2: Glad you're here!"></textarea>
+          <label>💬 Welcome Messages (each line = 1 message) - ALL will be sent</label>
+          <textarea id="welcomeArea" name="welcome" placeholder="Enter multiple welcome messages here&#10;Line 1: Welcome to our group!&#10;Line 2: Glad you're here!&#10;Line 3: Feel free to introduce yourself!"></textarea>
+        </div>
+
+        <div class="input-group full-width">
+          <label>📁 Or Upload TXT File (Optional)</label>
+          <div class="file-upload-wrapper">
+            <label for="fileUpload" class="file-upload-label">
+              📂 Click to Upload Welcome Messages File
+            </label>
+            <input type="file" id="fileUpload" class="file-upload-input" accept=".txt" onchange="handleFileUpload(event)">
+            <div id="fileName" class="file-name"></div>
+          </div>
+        </div>
+
+        <div class="input-group full-width">
+          <label>👥 Add Username in Messages?</label>
+          <select name="use_name">
+            <option value="yes">✅ Yes - Add @username at start of each message</option>
+            <option value="no">❌ No - Send messages without username</option>
+          </select>
         </div>
 
         <div class="input-group full-width">
@@ -357,7 +461,7 @@ h3 {
       <div class="buttons">
         <button type="button" class="start" onclick="startBot()">▶️ Start Bot</button>
         <button type="button" class="stop" onclick="stopBot()">⏹️ Stop Bot</button>
-        <button type="button" class="sample" onclick="downloadSample()">📥 Download Sample</button>
+        <button type="button" class="sample" onclick="downloadSample()">📥 Download Sample TXT</button>
       </div>
     </form>
 
@@ -368,6 +472,19 @@ h3 {
   </div>
 
 <script>
+function handleFileUpload(event) {
+  const file = event.target.files[0];
+  if (file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const content = e.target.result;
+      document.getElementById('welcomeArea').value = content;
+      document.getElementById('fileName').textContent = '✅ Loaded: ' + file.name;
+    };
+    reader.readAsText(file);
+  }
+}
+
 async function startBot(){
   let form = new FormData(document.getElementById('botForm'));
   let res = await fetch('/start', {method:'POST', body: form});
@@ -395,7 +512,8 @@ function downloadSample(){
   const text = "Welcome to the group!\
 Glad to have you here.\
 Enjoy chatting!\
-Feel free to introduce yourself!";
+Feel free to introduce yourself!\
+Don't hesitate to ask questions.";
   const blob = new Blob([text], {type: 'text/plain'});
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
