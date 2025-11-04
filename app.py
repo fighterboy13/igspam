@@ -1,46 +1,51 @@
 # app.py
-# Insta Multi Welcome Bot — Final (working backend + cyber-neon frontend)
+# Insta Multi Welcome Bot — Working backend + Blue Neon Orbitron UI (single file)
 # Usage:
 #   pip install -r requirements.txt
 #   python app.py
-# For Render: ensure Procfile contains: web: python app.py
+# For Render: Procfile -> web: python app.py
 
 import os
-import threading
 import time
 import json
+import threading
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template_string, send_file
+from flask import Flask, request, render_template_string, jsonify, send_file
+from werkzeug.utils import secure_filename
+
 from instagrapi import Client
 
 # ---------- CONFIG ----------
-APP = Flask(__name__)
-APP.secret_key = os.environ.get("FLASK_SECRET", "replace-with-a-secure-random-key")
+UPLOAD_FOLDER = "uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+SESSION_PATH = os.path.join(UPLOAD_FOLDER, "session.json")
+WELCOME_PATH = os.path.join(UPLOAD_FOLDER, "welcome_messages.txt")
+WELCOMED_CACHE = os.path.join(UPLOAD_FOLDER, "welcomed_cache.json")
+LOG_FILE = os.path.join(UPLOAD_FOLDER, "bot_logs.txt")
 
-UPLOADS_DIR = "uploads"
-os.makedirs(UPLOADS_DIR, exist_ok=True)
-SESSION_PATH = os.path.join(UPLOADS_DIR, "session.json")
-WELCOMED_CACHE_PATH = os.path.join(UPLOADS_DIR, "welcomed_cache.json")
-LOGFILE = os.path.join(UPLOADS_DIR, "bot_logs.txt")
+app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET", "replace-this-with-a-secure-key")
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024  # 8 MB
 
-# runtime
-BOT_THREAD = None
-BOT_THREAD_LOCK = threading.Lock()
-STOP_EVENT = threading.Event()
-LOGS = []
-BOT_STATUS = {"running": False, "task_id": None, "started_at": None, "last_ping": None}
+# runtime globals
+bot_thread = None
+bot_thread_lock = threading.Lock()
+bot_stop_event = None
+bot_status = {"running": False, "task_id": None, "started_at": None, "last_ping": None}
+bot_logs = []
 
-# ---------- HELPERS ----------
-def now_str():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+# ---------- helpers ----------
+def now_iso():
+    return datetime.now().isoformat()
 
 def append_log(msg):
-    line = f"[{now_str()}] {msg}"
-    LOGS.append(line)
-    if len(LOGS) > 2000:
-        del LOGS[:600]
+    line = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
+    bot_logs.append(line)
+    if len(bot_logs) > 2000:
+        del bot_logs[:500]
     try:
-        with open(LOGFILE, "a", encoding="utf-8") as f:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception:
         pass
@@ -48,8 +53,8 @@ def append_log(msg):
 
 def load_welcomed_cache():
     try:
-        if os.path.exists(WELCOMED_CACHE_PATH):
-            with open(WELCOMED_CACHE_PATH, "r", encoding="utf-8") as f:
+        if os.path.exists(WELCOMED_CACHE):
+            with open(WELCOMED_CACHE, "r", encoding="utf-8") as f:
                 arr = json.load(f)
                 return set(arr)
     except Exception as e:
@@ -58,81 +63,177 @@ def load_welcomed_cache():
 
 def save_welcomed_cache(s):
     try:
-        with open(WELCOMED_CACHE_PATH, "w", encoding="utf-8") as f:
+        with open(WELCOMED_CACHE, "w", encoding="utf-8") as f:
             json.dump(list(s), f)
     except Exception as e:
         append_log(f"Failed to save welcomed cache: {e}")
 
-# ---------- BOT WORKER ----------
+# ---------- bot worker ----------
 def instagram_bot_worker(task_id, cfg, stop_event):
     """
-    cfg: {
-      username, password,
-      group_ids (list),
-      welcome_messages (list),
+    cfg contains:
+      username, password, session_file (optional), group_ids (list or csv string),
+      welcome_mode ('file'|'single'|'split_by_line'), welcome_file (path), single_message,
       delay (float), poll_interval (float)
-    }
     """
     append_log(f"Task {task_id}: starting bot")
-    BOT_STATUS["running"] = True
-    BOT_STATUS["task_id"] = task_id
-    BOT_STATUS["started_at"] = now_str()
+    bot_status["running"] = True
+    bot_status["task_id"] = task_id
+    bot_status["started_at"] = now_iso()
 
     cl = Client()
 
-    # Try to load existing saved session settings (if present)
+    # try load uploaded session if provided
     try:
-        if os.path.exists(SESSION_PATH):
+        sess_path = cfg.get("session_file")
+        if sess_path and os.path.exists(sess_path):
             try:
-                cl.load_settings(SESSION_PATH)
-                append_log("Loaded session settings from disk (will attempt reuse).")
+                with open(sess_path, "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+                # instagrapi set_settings (older) or load_settings usage; use set_settings if available
+                try:
+                    cl.set_settings(settings)
+                except Exception:
+                    try:
+                        cl.load_settings(sess_path)
+                    except Exception:
+                        pass
+                append_log("Loaded session settings from uploaded file.")
+                # Try login to validate (may be no-op)
+                try:
+                    cl.login(cfg.get("username") or "", cfg.get("password") or "")
+                    append_log("Session validated via login attempt.")
+                except Exception:
+                    append_log("Login attempt after loading session settings failed (may still be authenticated).")
             except Exception as e:
-                append_log(f"Saved session load failed: {e}")
+                append_log(f"Saved session load failed: {e}. Will attempt fresh login if credentials provided.")
+        elif os.path.exists(SESSION_PATH):
+            try:
+                # try load settings file created by instagrapi
+                try:
+                    cl.load_settings(SESSION_PATH)
+                except Exception:
+                    with open(SESSION_PATH, "r", encoding="utf-8") as f:
+                        settings = json.load(f)
+                    try:
+                        cl.set_settings(settings)
+                    except Exception:
+                        pass
+                # try login (may reuse session)
+                try:
+                    cl.login(cfg.get("username") or "", cfg.get("password") or "")
+                    append_log("Loaded local session.json and attempted login.")
+                except Exception:
+                    append_log("Local session load: login after settings failed (session might still be valid).")
+            except Exception as e:
+                append_log(f"Local session load failed: {e}")
+        else:
+            append_log("No session file available on disk or provided upload.")
     except Exception as e:
-        append_log(f"Session load error: {e}")
+        append_log(f"Session handling error: {e}")
 
-    # Try login (use credentials; instagrapi will reuse session if valid)
+    # ensure authentication (try fresh)
     try:
-        append_log("Attempting login (this may reuse saved session)...")
-        cl.login(cfg.get("username"), cfg.get("password"))
+        # some versions have cl.authenticated, else we try to login if credentials provided
+        authenticated = False
         try:
-            cl.dump_settings(SESSION_PATH)
-            append_log(f"Saved session to {SESSION_PATH}")
-        except Exception as e:
-            append_log(f"Could not save session: {e}")
+            authenticated = getattr(cl, "authenticated", False)
+        except Exception:
+            authenticated = False
+
+        if not authenticated:
+            if cfg.get("username") and cfg.get("password"):
+                append_log("Attempting fresh login with provided credentials...")
+                cl.login(cfg["username"], cfg["password"])
+                # save session
+                try:
+                    cl.dump_settings(SESSION_PATH)
+                    append_log(f"Saved new session to {SESSION_PATH}")
+                except Exception as e:
+                    append_log(f"Failed to save session: {e}")
+            else:
+                append_log("Not authenticated and no credentials supplied. Bot cannot proceed.")
+                bot_status["running"] = False
+                return
+        else:
+            append_log("Client authenticated (reused session).")
     except Exception as e:
         append_log(f"Login failed: {e}")
-        BOT_STATUS["running"] = False
+        bot_status["running"] = False
         return
 
-    # Prepare messages and groups
-    welcome_messages = cfg.get("welcome_messages", [])
+    # prepare welcome messages
+    welcome_messages = []
+    try:
+        mode = cfg.get("welcome_mode", "file")
+        if mode == "file":
+            path = cfg.get("welcome_file") or WELCOME_PATH
+            if path and os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                welcome_messages = [m.strip() for m in content.split("===") if m.strip()]
+                append_log(f"Loaded {len(welcome_messages)} messages from file.")
+            else:
+                append_log("Welcome file not found for mode 'file'.")
+        elif mode == "single":
+            single = cfg.get("single_message") or ""
+            welcome_messages = [line.strip() for line in single.splitlines() if line.strip()]
+            append_log(f"Using single-message input broken into {len(welcome_messages)} messages.")
+        elif mode == "split_by_line":
+            path = cfg.get("welcome_file") or WELCOME_PATH
+            if path and os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                welcome_messages = [line.strip() for line in content.splitlines() if line.strip()]
+                append_log(f"Loaded {len(welcome_messages)} lines as messages from file.")
+            else:
+                append_log("Welcome file not found (split_by_line).")
+        else:
+            append_log("Unknown welcome_mode; no messages loaded.")
+    except Exception as e:
+        append_log(f"Error preparing welcome messages: {e}")
+
     if not welcome_messages:
-        append_log("No welcome messages provided — stopping bot.")
-        BOT_STATUS["running"] = False
+        append_log("No welcome messages to send. Stopping bot.")
+        bot_status["running"] = False
         return
 
+    # prepare group ids
     group_ids = cfg.get("group_ids", [])
     if isinstance(group_ids, str):
         group_ids = [g.strip() for g in group_ids.split(",") if g.strip()]
-
-    if not group_ids:
-        append_log("No group IDs provided — stopping bot.")
-        BOT_STATUS["running"] = False
-        return
-
-    append_log(f"Configured groups: {group_ids}")
+    append_log(f"Configured group IDs: {group_ids}")
 
     welcomed = load_welcomed_cache()
+
     delay = float(cfg.get("delay", 2))
     poll_interval = float(cfg.get("poll_interval", 6))
+    append_log(f"Delay between messages: {delay}s, poll interval: {poll_interval}s")
 
-    append_log(f"Delay between messages: {delay}s, Poll interval: {poll_interval}s")
+    # helper to send messages
+    def send_messages_to_thread(thread_id, target_username, target_user_pk=None):
+        for m in welcome_messages:
+            if stop_event.is_set():
+                return
+            msg = m.replace("{username}", target_username)
+            try:
+                cl.direct_send(msg, thread_ids=[thread_id])
+                append_log(f"Sent to @{target_username} in thread {thread_id}: {msg[:60]}")
+            except Exception as e:
+                try:
+                    if target_user_pk:
+                        cl.direct_send(msg, user_ids=[target_user_pk])
+                        append_log(f"Fallback: sent to @{target_username} by user id.")
+                    else:
+                        append_log(f"Send failed for @{target_username} in thread {thread_id}: {e}")
+                except Exception as e2:
+                    append_log(f"Final send error for @{target_username}: {e2}")
+            time.sleep(delay)
 
     # main loop
     try:
         while not stop_event.is_set():
-            BOT_STATUS["last_ping"] = now_str()
+            bot_status["last_ping"] = now_iso()
             for thread_id in group_ids:
                 if stop_event.is_set():
                     break
@@ -142,36 +243,18 @@ def instagram_bot_worker(task_id, cfg, stop_event):
                     for user in users:
                         if stop_event.is_set():
                             break
+                        username = getattr(user, "username", None) or str(getattr(user, "pk", "unknown"))
                         user_pk = getattr(user, "pk", None)
-                        username = getattr(user, "username", None) or str(user_pk)
-                        # skip welcoming self if username matches
-                        if cfg.get("username") and username == cfg.get("username"):
+                        if username == cfg.get("username"):
                             continue
                         key = f"{thread_id}::{username}"
                         if key not in welcomed:
-                            append_log(f"New member detected: @{username} in thread {thread_id}")
-                            for m in welcome_messages:
-                                if stop_event.is_set():
-                                    break
-                                try:
-                                    text = m.replace("{username}", username)
-                                    cl.direct_send(text, thread_ids=[thread_id])
-                                    append_log(f"Sent to @{username} in {thread_id}: {text[:80]}")
-                                except Exception as e_send:
-                                    append_log(f"Send error to @{username} in {thread_id}: {e_send}")
-                                    # fallback to user id if available
-                                    try:
-                                        if user_pk:
-                                            cl.direct_send(text, user_ids=[user_pk])
-                                            append_log(f"Fallback sent to @{username} by user id.")
-                                    except Exception as e2:
-                                        append_log(f"Fallback failed for @{username}: {e2}")
-                                time.sleep(delay)
+                            append_log(f"New user detected: @{username} in thread {thread_id}")
+                            send_messages_to_thread(thread_id, username, target_user_pk=user_pk)
                             welcomed.add(key)
                             save_welcomed_cache(welcomed)
-                except Exception as e_thread:
-                    append_log(f"Error reading thread {thread_id}: {e_thread}")
-
+                except Exception as e:
+                    append_log(f"Error reading thread {thread_id}: {e}")
             # responsive sleep
             slept = 0.0
             while slept < poll_interval:
@@ -180,333 +263,186 @@ def instagram_bot_worker(task_id, cfg, stop_event):
                 time.sleep(0.5)
                 slept += 0.5
     except Exception as e:
-        append_log(f"Worker exception: {e}")
+        append_log(f"Worker loop exception: {e}")
     finally:
-        BOT_STATUS["running"] = False
-        BOT_STATUS["task_id"] = None
-        append_log(f"Task {task_id}: stopped.")
+        try:
+            bot_status["running"] = False
+            bot_status["task_id"] = None
+            append_log(f"Task {task_id}: stopped.")
+        except Exception:
+            pass
 
-# ---------- UI: Cyber Neon HTML ----------
+# ---------- UI: Blue Neon Orbitron design ----------
 PAGE_HTML = r'''
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Insta Multi Welcome Bot — Cyber Neon</title>
-<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&display=swap" rel="stylesheet">
-<style>
-:root{
-  --bg1:#0f0c1a;
-  --bg2:#0b0426;
-  --neon1:#ff4dff;
-  --neon2:#00f6ff;
-  --accent:#9b59ff;
-}
-*{box-sizing:border-box}
-body{
-  margin:0; min-height:100vh; font-family: 'Nunito', sans-serif;
-  background: radial-gradient(1200px 600px at 10% 10%, rgba(155,89,255,0.06), transparent 5%),
-              linear-gradient(90deg,var(--bg1),var(--bg2));
-  color:#dffaff; display:flex; align-items:center; justify-content:center; padding:30px;
-}
-.container{
-  width:100%; max-width:1100px; border-radius:16px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
-  box-shadow: 0 10px 60px rgba(2,6,23,0.8), inset 0 1px 0 rgba(255,255,255,0.02);
-  padding:22px; position:relative; overflow:hidden;
-  border:1px solid rgba(255,255,255,0.03);
-}
-.bg-stripes{
-  position:absolute; inset:0; pointer-events:none; opacity:0.08; background:
-  repeating-linear-gradient(90deg, rgba(255,255,255,0.01) 0 1px, transparent 1px 60px);
-  transform:skewY(-3deg);
-  mix-blend-mode:overlay;
-}
-.header{
-  display:flex; gap:12px; align-items:center; justify-content:space-between; margin-bottom:8px;
-}
-.brand{
-  display:flex; gap:12px; align-items:center;
-}
-.logo{
-  width:72px; height:72px; border-radius:12px;
-  background: linear-gradient(135deg,var(--neon1),var(--neon2));
-  box-shadow: 0 6px 30px rgba(0,246,255,0.08), 0 0 40px rgba(255,77,255,0.06);
-  display:flex; align-items:center; justify-content:center; color:#081018; font-weight:900; font-size:18px;
-}
-.title{ font-size:20px; font-weight:800; letter-spacing:0.6px; color: #eaffff; text-shadow: 0 0 10px rgba(0,246,255,0.08); }
-.subtitle{ color:#9fd8e8; font-size:13px; margin-top:3px; }
-
-.grid{ display:grid; grid-template-columns: 1fr 420px; gap:18px; margin-top:12px; align-items:start; }
-.card{
-  background:transparent; padding:14px; border-radius:12px; border:1px solid rgba(255,255,255,0.03);
-}
-label{ display:block; color:#bfeffc; font-size:13px; margin-bottom:6px; }
-.input, textarea, select {
-  width:100%; padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.04);
-  background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.02));
-  color:#eafcff; font-size:14px; outline:none;
-}
-textarea{ min-height:120px; resize:vertical; }
-.row{ display:flex; gap:12px; align-items:center; margin-bottom:12px; }
-.small{ width:130px; }
-.actions{ display:flex; gap:12px; align-items:center; margin-top:8px; }
-.btn{
-  padding:10px 16px; border-radius:10px; border:none; cursor:pointer; font-weight:800; letter-spacing:0.6px;
-  background:linear-gradient(90deg,var(--neon2),var(--neon1)); color:#021020; box-shadow: 0 8px 30px rgba(0,246,255,0.06);
-}
-.btn.warn{ background:linear-gradient(90deg,#ff5f6d,#ffc371); color:#111; }
-.note{ font-size:13px; color:#9fd8e8; margin-top:6px; }
-
-.log-area{ background:linear-gradient(180deg, rgba(0,0,0,0.6), rgba(0,0,0,0.5)); padding:12px; border-radius:10px; max-height:560px; overflow:auto; }
-.log-line{ font-family:monospace; font-size:12px; color:#cffefc; padding:4px 0; border-bottom:1px dashed rgba(255,255,255,0.02); }
-
-.footer{ margin-top:12px; font-size:12px; color:#9fd8e8; text-align:center; }
-
-/* neon pulse */
-.neon-pill{
-  display:inline-block; padding:8px 12px; border-radius:999px; background:rgba(0,246,255,0.06); color:var(--neon2);
-  box-shadow: 0 6px 30px rgba(0,246,255,0.06), inset 0 -4px 20px rgba(0,246,255,0.02);
-  font-weight:700;
-}
-
-/* typing animation */
-@keyframes typing {
-  0% { opacity: 0; transform: translateX(-6px); }
-  100% { opacity: 1; transform: translateX(0); }
-}
-.subtitle .typing { animation: typing 1s ease forwards; }
-
-.sound {
-  width:34px; height:34px; border-radius:8px; background:linear-gradient(90deg,#111, #222); display:flex; align-items:center; justify-content:center; cursor:pointer;
-}
-.sound svg { filter: drop-shadow(0 4px 8px rgba(0,0,0,0.6)); }
-
-@media (max-width:980px){
-  .grid{ grid-template-columns: 1fr; }
-  .logo{ width:56px; height:56px; font-size:16px;}
-}
-</style>
+<html lang="en"><head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>INSTA MULTI WELCOME BOT</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg1:#020217; --bg2:#03102a;
+      --neon:#00f6ff; --accent:#7a4cff;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; min-height:100vh; font-family: 'Orbitron', monospace;
+      background: radial-gradient(circle at 10% 10%, rgba(0,246,255,0.03), transparent 8%),
+                  linear-gradient(120deg,var(--bg1),var(--bg2));
+      color:#dff8ff; display:flex; align-items:center; justify-content:center; padding:24px;
+    }
+    .card{ width:100%; max-width:980px; background:rgba(8,10,20,0.8); padding:26px; border-radius:16px; box-shadow:0 10px 40px rgba(0,0,0,0.6); border:1px solid rgba(255,255,255,0.03); position:relative; overflow:hidden;}
+    .title { font-size:28px; font-weight:900; color:var(--neon); text-shadow:0 0 12px rgba(0,246,255,0.12); margin-bottom:6px;}
+    .subtitle { color:#9fd8e8; margin-bottom:18px;}
+    .row{ display:flex; gap:12px; margin-bottom:12px; align-items:center; }
+    label{ width:220px; color:#bfeffc; font-size:13px; }
+    input, textarea, select { flex:1; padding:10px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.05); background: rgba(255,255,255,0.02); color:#eafcff; font-size:14px;}
+    textarea{ min-height:90px; resize:vertical;}
+    .small{ width:160px; }
+    button{ padding:10px 14px; border-radius:10px; border:none; cursor:pointer; font-weight:700; color:#001218; background:linear-gradient(90deg,var(--neon),var(--accent)); }
+    .btn-stop{ background:linear-gradient(90deg,#ff5f6d,#ffc371); color:#111; }
+    .panel{ margin-top:18px; display:flex; gap:18px; }
+    .panel>div{ flex:1; background: rgba(255,255,255,0.02); padding:12px; border-radius:10px; min-height:150px; }
+    pre{ white-space:pre-wrap; word-break:break-word; font-size:13px; color:#dff8ff; background:transparent; border:none; }
+    .muted{ color:#8bbfcc; font-size:13px; }
+    .note{ font-size:13px; color:#b8f3ff; margin-top:8px;}
+    .bg-lines{ position:absolute; inset:0; pointer-events:none; opacity:0.06; background-image: repeating-linear-gradient(90deg, rgba(255,255,255,0.02) 0 1px, transparent 1px 40px); transform:skewY(-3deg); }
+    .footer{ margin-top:12px; font-size:12px; color:#9fd8e8; text-align:center;}
+    @media (max-width:980px){ .row{ display:block; } label{ width:100%; margin-bottom:6px; } }
+  </style>
 </head>
 <body>
-  <div class="container">
-    <div class="bg-stripes"></div>
-    <div class="header">
-      <div class="brand">
-        <div class="logo">IN</div>
-        <div>
-          <div class="title">INSTA MULTI WELCOME BOT</div>
-          <div class="subtitle"><span class="typing">Cyber Neon • Auto-session • Multi-group • 24/7</span></div>
-        </div>
+  <div class="card">
+    <div class="bg-lines"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div class="title">INSTA MULTI WELCOME BOT</div>
+        <div class="subtitle">Blue Neon • Orbitron • Auto-session • Multi-group</div>
       </div>
-      <div style="display:flex; gap:10px; align-items:center;">
-        <div class="neon-pill" id="status-pill">Stopped</div>
-        <div class="sound" id="soundBtn" title="Toggle click sound">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 9v6h4l5 5V4L9 9H5z" stroke="#9ff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </div>
+      <div class="muted">Status:
+        <span id="statusText" style="font-weight:900; color:#ffd6d6">Stopped</span>
       </div>
     </div>
 
-    <div class="grid">
-      <div class="card">
-        <form id="controlForm">
-          <label>Instagram Username</label>
-          <input class="input" name="username" placeholder="username (will be saved to create session)" required />
-          <label>Password</label>
-          <input class="input" type="password" name="password" placeholder="password (only used to login)" required />
-          <label>Welcome messages (each line = 1 message)</label>
-          <textarea name="welcome_messages" class="input" placeholder="Welcome @{username}!\nHello @{username}, enjoy the group!"></textarea>
-          <label>Group Chat IDs (comma separated)</label>
-          <input class="input" name="group_ids" placeholder="24632887389663044,123456789012345" />
-          <div class="row">
-            <div style="flex:1">
-              <label>Delay between messages (sec)</label>
-              <input class="input small" name="delay" value="2" />
-            </div>
-            <div style="flex:1">
-              <label>Poll interval (sec)</label>
-              <input class="input small" name="poll_interval" value="6" />
-            </div>
-          </div>
-          <div class="actions">
-            <button type="button" class="btn" id="startBtn">Start Bot</button>
-            <button type="button" class="btn warn" id="stopBtn">Stop Bot</button>
-            <button type="button" class="btn" id="downloadSample">Download Sample</button>
-          </div>
-          <div class="note">Use <code>{username}</code> placeholder inside messages to mention user.</div>
-        </form>
+    <form id="controlForm" method="post" action="/start" enctype="multipart/form-data">
+      <div class="row"><label>Instagram Username</label><input name="username" type="text" placeholder="username (optional if session.json exists)"/></div>
+      <div class="row"><label>Password</label><input name="password" type="password" placeholder="password (only if fresh login)"/></div>
+      <div class="row"><label>Upload session.json</label><input name="session_file" type="file" accept=".json" /></div>
+      <div class="row"><label>Upload welcome_messages.txt (use === as separators)</label><input name="welcome_file" type="file" accept=".txt" /></div>
+      <div class="row"><label>Or paste single welcome message (new lines => separate messages)</label><textarea name="single_message" rows="3"></textarea></div>
+      <div class="row"><label>Welcome mode</label>
+        <select name="welcome_mode">
+          <option value="file">File (===)</option>
+          <option value="single">Single (split by newline)</option>
+          <option value="split_by_line">Split by line</option>
+        </select>
       </div>
+      <div class="row"><label>Group Chat IDs (comma separated)</label><input name="group_ids" type="text" placeholder="e.g. 24632887389663044,123..." /></div>
+      <div class="row"><label>Delay between messages (sec)</label><input name="delay" value="2" class="small" /><label style="width:120px">Poll interval (sec)</label><input name="poll_interval" value="6" class="small" /></div>
 
-      <div class="card log-area">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <div><strong>Live Logs</strong></div>
-          <div style="font-size:12px; color:#9fd8e8">Task: <span id="taskId">—</span></div>
-        </div>
-        <div id="logs" style="max-height:440px; overflow:auto"></div>
-        <div class="footer">Tip: Keep this service private. Session file saved to <code>/uploads/session.json</code>.</div>
+      <div style="display:flex;gap:12px;margin-top:12px;">
+        <button type="submit" class="btn-start">Start Bot</button>
+        <button formaction="/stop" formmethod="post" class="btn-stop">Stop Bot</button>
+        <a href="/download_sample" style="text-decoration:none"><button type="button" style="background:linear-gradient(90deg,#8be8a9,#7ab4ff); color:#001;">Download sample</button></a>
+      </div>
+    </form>
+
+    <div class="panel">
+      <div>
+        <h4 style="margin:6px 0">Logs</h4>
+        <pre id="logs">{{ logs }}</pre>
+      </div>
+      <div>
+        <h4 style="margin:6px 0">Runtime Info</h4>
+        <div class="note"><b>Task ID:</b> {{ status.task_id or '—' }}</div>
+        <div class="note"><b>Started at:</b> {{ status.started_at or '—' }}</div>
+        <div class="note"><b>Last ping:</b> {{ status.last_ping or '—' }}</div>
+        <div class="note"><b>Welcomed cache size:</b> {{ welcomed_count }}</div>
       </div>
     </div>
+
+    <div class="footer">Tip: Keep this service private. Do not commit session.json to public repos.</div>
   </div>
 
 <script>
-let soundOn = true;
-const soundBtn = document.getElementById('soundBtn');
-const startBtn = document.getElementById('startBtn');
-const stopBtn = document.getElementById('stopBtn');
-const statusPill = document.getElementById('status-pill');
-const logsEl = document.getElementById('logs');
-const taskIdEl = document.getElementById('taskId');
-
-soundBtn.addEventListener('click', () => { soundOn = !soundOn; soundBtn.style.opacity = soundOn ? '1' : '0.5'; });
-
-function playClick(){
-  if(!soundOn) return;
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.type = 'sine';
-    o.frequency.value = 900;
-    g.gain.value = 0.02;
-    o.connect(g); g.connect(ctx.destination);
-    o.start(); setTimeout(()=>{ o.stop(); ctx.close(); }, 80);
-  } catch(e){}
-}
-
-async function fetchLogs(){
-  try {
-    const r = await fetch('/_status');
-    const j = await r.json();
-    logsEl.innerHTML = j.logs.map(l => `<div class="log-line">${l}</div>`).join('');
-    taskIdEl.innerText = j.status.task_id || '—';
-    statusPill.innerText = j.status.running ? 'Running' : 'Stopped';
-    statusPill.style.background = j.status.running ? 'linear-gradient(90deg,#00f6ff,#ff4dff)' : 'rgba(0,0,0,0.6)';
-    logsEl.scrollTop = logsEl.scrollHeight;
-  } catch(e){}
-}
-setInterval(fetchLogs, 1500);
-fetchLogs();
-
-document.getElementById('downloadSample').addEventListener('click', ()=> {
-  const sample = "Welcome @{username} 👋\\n===\\nHello @{username}, enjoy the group!\\n===\\nThanks for joining, @{username}!";
-  const blob = new Blob([sample], {type:'text/plain'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'welcome_messages_sample.txt'; a.click();
-  URL.revokeObjectURL(url);
-});
-
-startBtn.addEventListener('click', async () => {
-  const form = document.getElementById('controlForm');
-  const fd = new FormData(form);
-  const wm = fd.get('welcome_messages') || '';
-  if(!wm.trim()){ alert('Please add welcome messages (each line = 1 message)'); return; }
-  playClick();
-  startBtn.disabled = true;
-  startBtn.innerText = 'Starting...';
-  try {
-    const res = await fetch('/start', { method: 'POST', body: fd });
-    const j = await res.json();
-    alert(j.message || (j.ok ? 'Bot started' : 'Error'));
-  } catch(e){ alert('Start failed'); }
-  startBtn.disabled = false;
-  startBtn.innerText = 'Start Bot';
-});
-
-stopBtn.addEventListener('click', async () => {
-  playClick();
-  try {
-    const res = await fetch('/stop', { method: 'POST' });
-    const j = await res.json();
-    alert(j.message || (j.ok ? 'Stopped' : 'Error'));
-  } catch(e){ alert('Stop failed'); }
-});
+  // periodically update logs and status
+  async function refreshStatus(){
+    try{
+      const r = await fetch('/status');
+      const j = await r.json();
+      document.getElementById('logs').innerText = j.logs.join('\\n');
+      document.getElementById('statusText').innerText = j.running ? 'Running' : 'Stopped';
+    }catch(e){}
+  }
+  setInterval(refreshStatus, 3000);
+  refreshStatus();
 </script>
 </body>
 </html>
 '''
 
-# ---------- FLASK ENDPOINTS ----------
-@APP.route("/")
+@app.route("/")
 def index():
-    return render_template_string(PAGE_HTML)
+    small_logs = bot_logs[-400:]
+    welcomed = load_welcomed_cache()
+    return render_template_string(PAGE_HTML, logs="\n".join(small_logs[::-1]) if small_logs else "No logs yet.", status=bot_status, welcomed_count=len(welcomed))
 
-@APP.route("/start", methods=["POST"])
-def start_from_ui():
-    global BOT_THREAD, STOP_EVENT
-    if BOT_THREAD and BOT_THREAD.is_alive():
-        return jsonify({"ok": False, "message": "Bot already running."})
-
-    username = (request.form.get("username") or "").strip()
-    password = (request.form.get("password") or "").strip()
-    raw_msgs = request.form.get("welcome_messages") or ""
-    welcome_messages = [m.strip() for m in raw_msgs.splitlines() if m.strip()]
-    group_ids_raw = (request.form.get("group_ids") or "").strip()
-    group_ids = [g.strip() for g in group_ids_raw.split(",") if g.strip()]
+@app.route("/download_sample")
+def download_sample():
+    sample = ("Hey @{username} 👋 Welcome to the group! 🚀\n===\n🎉 @{username}, glad to have you here! 🥳\n===\nWelcome, @{username}!\n")
+    path = os.path.join(UPLOAD_FOLDER, "sample_welcome.txt")
     try:
-        delay = float(request.form.get("delay") or 2)
-    except:
-        delay = 2.0
-    try:
-        poll_interval = float(request.form.get("poll_interval") or 6)
-    except:
-        poll_interval = 6.0
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(sample)
+        return send_file(path, as_attachment=True, download_name="welcome_messages_sample.txt")
+    except Exception as e:
+        append_log(f"Failed to create sample file: {e}")
+        return jsonify({"ok": False, "message": "Failed to create sample."})
 
-    # also support upload of a welcome file
+@app.route("/start", methods=["POST"])
+def start_bot():
+    global bot_thread, bot_stop_event
+    if bot_status.get("running"):
+        # already running
+        return render_template_string(PAGE_HTML, logs="\n".join(bot_logs[-400:][::-1]), status=bot_status, welcomed_count=len(load_welcomed_cache()))
+
+    username = request.form.get("username") or ""
+    password = request.form.get("password") or ""
+    group_ids = request.form.get("group_ids") or ""
+    delay = request.form.get("delay") or "2"
+    poll_interval = request.form.get("poll_interval") or "6"
+    welcome_mode = request.form.get("welcome_mode") or "file"
+    single_message = request.form.get("single_message") or ""
+
+    # handle file uploads
+    session_file_path = None
+    if "session_file" in request.files:
+        f = request.files["session_file"]
+        if f and f.filename:
+            dest = os.path.join(app.config["UPLOAD_FOLDER"], "uploaded_session.json")
+            f.save(dest)
+            session_file_path = dest
+            append_log(f"Uploaded session file saved to {dest}")
+
+    welcome_file_path = None
     if "welcome_file" in request.files:
         f = request.files["welcome_file"]
         if f and f.filename:
-            try:
-                content = f.read().decode("utf-8")
-                file_msgs = [m.strip() for m in content.splitlines() if m.strip()]
-                if file_msgs:
-                    welcome_messages = file_msgs
-            except Exception as e:
-                append_log(f"Failed to read uploaded welcome file: {e}")
+            dest = os.path.join(app.config["UPLOAD_FOLDER"], "uploaded_welcome.txt")
+            f.save(dest)
+            welcome_file_path = dest
+            append_log(f"Uploaded welcome file saved to {dest}")
 
-    if not username or not password:
-        return jsonify({"ok": False, "message": "Please provide username and password."})
-    if not welcome_messages:
-        return jsonify({"ok": False, "message": "Please provide at least one welcome message."})
-    if not group_ids:
-        return jsonify({"ok": False, "message": "Please provide group chat IDs."})
+    if not welcome_file_path and os.path.exists(WELCOME_PATH):
+        welcome_file_path = WELCOME_PATH
 
-    STOP_EVENT.clear()
-    task_id = f"TASK-{int(time.time())}"
     cfg = {
-        "username": username,
-        "password": password,
+        "username": username.strip() if username else None,
+        "password": password.strip() if password else None,
+        "session_file": session_file_path,
         "group_ids": group_ids,
-        "welcome_messages": welcome_messages,
-        "delay": delay,
-        "poll_interval": poll_interval
-    }
-    with BOT_THREAD_LOCK:
-        BOT_THREAD = threading.Thread(target=instagram_bot_worker, args=(task_id, cfg, STOP_EVENT), daemon=True)
-        BOT_THREAD.start()
-    append_log(f"Started bot task {task_id}")
-    return jsonify({"ok": True, "message": "Bot started.", "task_id": task_id})
-
-@APP.route("/stop", methods=["POST"])
-def stop_from_ui():
-    STOP_EVENT.set()
-    append_log("Stop requested from UI")
-    return jsonify({"ok": True, "message": "Stop signal sent."})
-
-@APP.route("/_status")
-def status_endpoint():
-    return jsonify({
-        "status": BOT_STATUS,
-        "logs": LOGS[-400:]
-    })
-
-@APP.route("/download_session")
-def download_session():
-    if os.path.exists(SESSION_PATH):
-        return send_file(SESSION_PATH, as_attachment=True, download_name="session.json")
-    return jsonify({"ok": False, "message": "No session available."})
-
-# ---------- RUN ----------
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    append_lo
+        "welcome_mode": welcome_mode,
+        "welcome_file": welcome_file_path,
+        "single_message": single_message,
+        "delay": f
