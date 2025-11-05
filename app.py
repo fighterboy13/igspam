@@ -12,13 +12,7 @@ STOP_EVENT = threading.Event()
 LOGS = []
 SESSION_FILE = "session.json"
 STATS = {"total_welcomed": 0, "today_welcomed": 0, "last_reset": datetime.now().date()}
-BOT_CONFIG = {
-    "auto_replies": {},
-    "auto_reply_active": False,
-    "locked_group_names": {},
-    "target_spam": {},
-    "spam_active": {}
-}
+BOT_CONFIG = {"auto_replies": {}, "auto_reply_active": False, "locked_group_names": {}, "target_spam": {}, "spam_active": {}}
 
 def log(msg):
     ts = datetime.now().strftime('%H:%M:%S')
@@ -27,20 +21,8 @@ def log(msg):
     print(lm)
 
 MUSIC_EMOJIS = ["🎵", "🎶", "🎸", "🎹", "🎤", "🎧", "🎺", "🎷"]
-FUNNY_MSGS = [
-    "Hahaha! 😂",
-    "LOL! Bahut funny! 🤣",
-    "Mast joke tha! 😆",
-    "Dimag ka dahi ho gaya! 🤪",
-    "Comedy king! 👑😂"
-]
-MASTI_MSGS = [
-    "Chalo party karte hain! 🎉",
-    "Masti time! 🥳",
-    "Dhamaal macha dete hain! 💃",
-    "Full masti mode ON! 🔥",
-    "Enjoy karo dosto! 🎊"
-]
+FUNNY_MSGS = ["Hahaha! 😂", "LOL! Bahut funny! 🤣", "Mast joke tha! 😆", "Dimag ka dahi ho gaya! 🤪", "Comedy king! 👑😂"]
+MASTI_MSGS = ["Chalo party karte hain! 🎉", "Masti time! 🥳", "Dhamaal macha dete hain! 💃", "Full masti mode ON! 🔥", "Enjoy karo dosto! 🎊"]
 
 def run_bot(un, pw, wm, gids, dly, pol, ucn, ecmd, admin_ids):
     cl = Client()
@@ -206,11 +188,7 @@ def run_bot(un, pw, wm, gids, dly, pol, ucn, ecmd, admin_ids):
                                         except:
                                             cl.direct_send("Cannot kick admin/owner", thread_ids=[gid])
                             elif tl in ["/rules", "!rules"]:
-                                rules = "GROUP RULES:
-1. Be respectful
-2. No spam
-3. Follow guidelines
-4. Have fun!"
+                                rules = "GROUP RULES: 1. Be respectful 2. No spam 3. Follow guidelines 4. Have fun!"
                                 cl.direct_send(rules, thread_ids=[gid])
                                 log("Rules sent")
                             elif is_admin and (tl.startswith("/spam ") or tl.startswith("!spam ")):
@@ -283,7 +261,7 @@ def start_bot():
     admin_input = request.form.get("admin_ids", "").strip()
     admin_ids = [a.strip() for a in admin_input.split(",") if a.strip()] if admin_input else []
     dly = int(request.form.get("delay", 3))
-    pol = int(request.form.get("poll", 10))
+    pol = int(request.form.get("poll", 5))
     ucn = request.form.get("use_custom_name") == "yes"
     ecmd = request.form.get("enable_commands") == "yes"
     if not un or not pw or not gids or not wl:
