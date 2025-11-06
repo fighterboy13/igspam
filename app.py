@@ -192,7 +192,7 @@ def worker_run(accounts_list, thread_ids, names_list, delay_ms, err_threshold):
         add_log("🛑 Worker stopped")
 
 
-# ---------- HTML (with neon design) ----------
+# ---------- HTML (with simple bold fonts) ----------
 INDEX_HTML = """
 <!doctype html>
 <html>
@@ -200,12 +200,12 @@ INDEX_HTML = """
   <meta charset="utf-8" />
   <title>INSTA NC OFFLINE</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     
     body {
-      font-family: 'Orbitron', 'Arial', sans-serif;
+      font-family: 'Arial', 'Helvetica', sans-serif;
+      font-weight: 700;
       background: #000;
       color: #fff;
       min-height: 100vh;
@@ -278,7 +278,6 @@ INDEX_HTML = """
       -webkit-text-fill-color: transparent;
       animation: gradientText 3s linear infinite;
       text-shadow: 0 0 30px rgba(255,0,255,0.5);
-      letter-spacing: 4px;
     }
     
     @keyframes gradientText {
@@ -289,6 +288,7 @@ INDEX_HTML = """
     .header p {
       color: #00ffff;
       font-size: 1.1rem;
+      font-weight: 700;
       margin-top: 10px;
       text-shadow: 0 0 10px rgba(0,255,255,0.7);
     }
@@ -344,11 +344,9 @@ INDEX_HTML = """
     
     .form-box label {
       display: block;
-      font-weight: 700;
+      font-weight: 900;
       margin-bottom: 10px;
       font-size: 1.1rem;
-      text-transform: uppercase;
-      letter-spacing: 2px;
     }
     
     .form-box input,
@@ -359,7 +357,8 @@ INDEX_HTML = """
       border-radius: 10px;
       padding: 15px;
       color: #fff;
-      font-family: 'Orbitron', monospace;
+      font-family: 'Arial', sans-serif;
+      font-weight: 700;
       font-size: 1rem;
       transition: all 0.3s ease;
     }
@@ -391,13 +390,11 @@ INDEX_HTML = """
       padding: 15px 35px;
       border: none;
       border-radius: 10px;
-      font-family: 'Orbitron', sans-serif;
-      font-weight: 700;
+      font-family: 'Arial', sans-serif;
+      font-weight: 900;
       font-size: 1.1rem;
       cursor: pointer;
       transition: all 0.3s ease;
-      text-transform: uppercase;
-      letter-spacing: 2px;
       position: relative;
       overflow: hidden;
     }
@@ -467,6 +464,7 @@ INDEX_HTML = """
       color: #ffff00;
       margin-bottom: 15px;
       font-size: 1.3rem;
+      font-weight: 900;
       text-shadow: 0 0 10px rgba(255,255,0,0.7);
     }
     
@@ -475,6 +473,7 @@ INDEX_HTML = """
       justify-content: space-between;
       margin-bottom: 10px;
       font-size: 1rem;
+      font-weight: 700;
     }
     
     .status-item .label {
@@ -483,7 +482,7 @@ INDEX_HTML = """
     
     .status-item .value {
       color: #ff00ff;
-      font-weight: 700;
+      font-weight: 900;
     }
     
     /* Logs Section */
@@ -499,6 +498,7 @@ INDEX_HTML = """
       color: #00ff00;
       margin-bottom: 15px;
       font-size: 1.5rem;
+      font-weight: 900;
       text-shadow: 0 0 10px rgba(0,255,0,0.7);
     }
     
@@ -509,6 +509,7 @@ INDEX_HTML = """
       padding: 20px;
       color: #00ff00;
       font-family: 'Courier New', monospace;
+      font-weight: 700;
       font-size: 0.95rem;
       max-height: 400px;
       overflow-y: auto;
@@ -537,6 +538,7 @@ INDEX_HTML = """
       margin-top: 40px;
       color: #00ffff;
       font-size: 0.9rem;
+      font-weight: 700;
       text-shadow: 0 0 10px rgba(0,255,255,0.5);
     }
     
@@ -654,7 +656,7 @@ function updateStatus(){
     document.getElementById('btnStop').disabled = !j.running;
   });
   fetch('/logs').then(r=>r.json()).then(j=>{
-    const logs = j.logs.join('\
+    const logs = j.logs.join('
 ');
     const pre = document.getElementById('logs');
     pre.innerText = logs || "No logs yet.";
