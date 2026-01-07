@@ -160,8 +160,7 @@ def start_bot():
         ADMIN_IDS = [admin.strip() for admin in admin_input.split(',') if admin.strip()]
         
         group_ids = [g.strip() for g in request.form.get('group_ids', '').split(',') if g.strip()]
-        welcome_msgs = [m.strip() for m in request.form.get('welcome', '').split('
-') if m.strip()]
+        welcome_msgs = [m.strip() for m in request.form.get('welcome', '').split('') if m.strip()]
         
         if not group_ids:
             return jsonify({'success': False, 'message': '❌ Enter Group IDs'})
