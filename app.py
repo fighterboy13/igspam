@@ -13,8 +13,13 @@ STOP_EVENT = threading.Event()
 LOGS = []
 SESSION_FILE = "session.json"
 TOKEN_FILE = "token.txt"
+GROUP_CONFIG_FILE = "group_config.json"
 STATS = {"total_welcomed": 0, "today_welcomed": 0, "last_reset": datetime.now().date()}
-BOT_CONFIG = {"auto_replies": {}, "auto_reply_active": False, "target_spam": {}, "spam_active": {}, "media_library": {}}
+BOT_CONFIG = {"auto_replies": {}, "auto_reply_active": False}
+
+# Global config
+GROUP_CHAT_ID = None
+ADMIN_USER_ID = None
 
 def log(msg):
     ts = datetime.now().strftime('%H:%M:%S')
@@ -22,7 +27,7 @@ def log(msg):
     LOGS.append(lm)
     print(lm)
 
-# Complete emoji lists
+# Emoji lists
 MUSIC_EMOJIS = ["🎵", "🎶", "🎤", "🎸", "🥁", "🎹", "🎺", "🎷", "🥰", "❤️"]
 LOVE_EMOJIS = ["❤️", "💕", "💖", "💗", "💓", "💞", "💘", "💝"]
 STAR_EMOJIS = ["⭐", "✨", "🌟", "💫", "⭐️"]
@@ -50,7 +55,7 @@ def load_session():
             return True
             
         else:
-            log("⚠️ No session or token found - use dashboard to set token")
+            log("⚠️ No session or token - use dashboard")
             SESSION_LOADED = False
             return False
             
@@ -64,8 +69,31 @@ def save_session():
         if SESSION_LOADED:
             cl.dump_settings(SESSION_FILE)
             log("💾 Session saved")
-    except Exception as e:
-        log(f"❌ Save session failed: {str(e)}")
+    except:
+        pass
+
+def load_group_config():
+    global GROUP_CHAT_ID, ADMIN_USER_ID
+    try:
+        if os.path.exists(GROUP_CONFIG_FILE):
+            with open(GROUP_CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+                GROUP_CHAT_ID = config.get('group_chat_id')
+                ADMIN_USER_ID = config.get('admin_user_id')
+                log(f"✅ Group config loaded: {GROUP_CHAT_ID}")
+    except:
+        pass
+
+def save_group_config():
+    try:
+        config = {
+            'group_chat_id': GROUP_CHAT_ID,
+            'admin_user_id': ADMIN_USER_ID
+        }
+        with open(GROUP_CONFIG_FILE, 'w') as f:
+            json.dump(config, f)
+    except:
+        pass
 
 def reset_daily_stats():
     global STATS
@@ -93,51 +121,80 @@ def load_stats():
 
 def bot_loop():
     global BOT_THREAD, STOP_EVENT
-    log("🤖 Instagram Bot started")
+    log("🤖 Instagram Group Bot started")
     
     while not STOP_EVENT.is_set():
         try:
-            if not SESSION_LOADED:
+            if not SESSION_LOADED or not GROUP_CHAT_ID or not ADMIN_USER_ID:
+                log("⏳ Waiting for full config...")
                 time.sleep(5)
                 continue
                 
             reset_daily_stats()
             if STATS["today_welcomed"] >= 50:
-                log("⏳ Daily limit reached (50)")
-                time.sleep(300)  # Wait 5 min
+                log("⏳ Daily limit reached")
+                time.sleep(300)
                 continue
             
-            threads = cl.direct_threads(amount=10)
+            # Check specific group
+            threads = cl.direct_threads(amount=5)
             for thread in threads:
-                messages = thread.messages
-                if messages:
-                    last_msg = messages[0].text.lower() if messages[0].text else ""
-                    
-                    replied = False
-                    for trigger, reply in BOT_CONFIG["auto_replies"].items():
-                        if trigger in last_msg and BOT_CONFIG["auto_reply_active"]:
-                            emoji = random.choice(LOVE_EMOJIS + MUSIC_EMOJIS)
-                            cl.direct_send(f"{reply} {emoji}", thread_id=thread.id)
-                            STATS["total_welcomed"] += 1
-                            STATS["today_welcomed"] += 1
-                            save_stats()
-                            log(f"📨 Auto replied to {thread.users[0].username}")
-                            replied = True
-                            break
-                    
-                    if not replied and ("hi" in last_msg or "hello" in last_msg or "hey" in last_msg):
-                        welcome_msg = random.choice([
-                            "Namaste! Kaise ho? ❤️",
-                            "Hello! Welcome dost! 🎶", 
-                            "Hi! Kya haal hai? ⭐✨"
-                        ])
-                        cl.direct_send(welcome_msg, thread_id=thread.id)
-                        STATS["total_welcomed"] += 1
-                        STATS["today_welcomed"] += 1
-                        save_stats()
-                        log(f"👋 Welcomed {thread.users[0].username}")
+                if str(thread.id) == GROUP_CHAT_ID:
+                    messages = thread.messages
+                    if messages:
+                        last_msg = messages[0]
+                        
+                        # Only admin messages
+                        if str(last_msg.user_id) == ADMIN_USER_ID:
+                            msg_text = last_msg.text.lower() if last_msg.text else ""
+                            
+                            # Commands
+                            if "/start" in msg_text:
+                                cl.direct_send("🤖 Bot active!
+
+👑 Admin Commands:
+/start - Activate
+/stats - Statistics
+/reply hello Namaste - Add auto reply
+/stop - Pause", thread_id=GROUP_CHAT_ID)
+                                log("✅ /start command executed")
+                                
+                            elif "/stats" in msg_text:
+                                stats_msg = f"📊 Stats:
+Total: {STATS['total_welcomed']}
+Today: {STATS['today_welcomed']}/50"
+                                cl.direct_send(stats_msg, thread_id=GROUP_CHAT_ID)
+                                
+                            elif "/stop" in msg_text:
+                                STOP_EVENT.set()
+                                cl.direct_send("⏹️ Bot paused", thread_id=GROUP_CHAT_ID)
+                                log("✅ /stop command executed")
+                                
+                            elif msg_text.startswith("/reply "):
+                                try:
+                                    parts = msg_text.split(" ", 2)
+                                    if len(parts) == 3:
+                                        trigger, reply_msg = parts[1], parts[2]
+                                        BOT_CONFIG["auto_replies"][trigger.lower()] = reply_msg
+                                        BOT_CONFIG["auto_reply_active"] = True
+                                        cl.direct_send(f"✅ Added: '{trigger}' → '{reply_msg[:30]}...'", thread_id=GROUP_CHAT_ID)
+                                        log(f"➕ Reply added: {trigger}")
+                                except:
+                                    cl.direct_send("❌ Format: /reply hello Namaste bhai", thread_id=GROUP_CHAT_ID)
+                            
+                            # Auto replies for group members
+                            elif BOT_CONFIG["auto_reply_active"]:
+                                for trigger, reply in BOT_CONFIG["auto_replies"].items():
+                                    if trigger in msg_text:
+                                        emoji = random.choice(LOVE_EMOJIS + MUSIC_EMOJIS)
+                                        cl.direct_send(f"{reply} {emoji}", thread_id=GROUP_CHAT_ID)
+                                        STATS["total_welcomed"] += 1
+                                        STATS["today_welcomed"] += 1
+                                        save_stats()
+                                        log(f"📨 Auto reply sent")
+                                        break
             
-            time.sleep(30)
+            time.sleep(20)
             
         except Exception as e:
             log(f"⚠️ Bot error: {str(e)}")
@@ -161,12 +218,12 @@ def stop_bot():
     BOT_THREAD = None
     log("⏹️ Bot stopped")
 
-# COMPLETE DASHBOARD HTML with TOKEN INPUT
+# COMPLETE DASHBOARD HTML
 DASHBOARD_HTML = '''
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Instagram Bot Dashboard</title>
+    <title>Instagram Group Bot Dashboard</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
@@ -191,12 +248,13 @@ DASHBOARD_HTML = '''
         .status.offline { background:#f8d7da; color:#721c24; }
         h1 { text-align:center; color:white; margin-bottom:10px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
         .emoji { font-size:24px; margin-right:10px; }
-        .token-input { font-size:12px; font-family:monospace; letter-spacing:1px; }
+        .token-input, .id-input { font-size:12px; font-family:monospace; letter-spacing:1px; }
+        .commands { background:#e8f5e8; padding:15px; border-radius:10px; margin-top:10px; font-family:monospace; font-size:12px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1><span class="emoji">🤖</span>Instagram Bot Dashboard<span class="emoji">📱</span></h1>
+        <h1><span class="emoji">🤖</span>Instagram Group Bot<span class="emoji">👥</span></h1>
         
         <div class="card">
             <div class="stats-grid">
@@ -206,7 +264,7 @@ DASHBOARD_HTML = '''
                 </div>
                 <div class="stat-card" style="background: linear-gradient(45deg, #48dbfb, #0abde3);">
                     <div style="font-size:32px;">{{ today_welcomed }}</div>
-                    <div>Today</div>
+                    <div>Today (50 max)</div>
                 </div>
                 <div class="stat-card" style="background: linear-gradient(45deg, #ff9ff3, #f368e0);">
                     <div style="font-size:32px;">{% if bot_status %}🟢 Live{% else %}🔴 Stopped{% endif %}</div>
@@ -232,11 +290,34 @@ DASHBOARD_HTML = '''
         <div class="card">
             <h3>🔑 Token Setup</h3>
             <div class="form-group">
-                <label>Paste Instagram Token Here:</label>
+                <label>Paste Instagram Token:</label>
                 <input type="text" id="tokenInput" class="token-input" placeholder="73946433692%3A86Qq7BtIBfGquT...">
                 <button class="btn btn-primary" onclick="setToken()" style="margin-top:10px;">✅ Set Token</button>
             </div>
             <div id="tokenStatus" class="status offline" style="font-size:12px;">No token set</div>
+        </div>
+
+        <div class="card">
+            <h3>👥 Group & Admin Setup</h3>
+            <div class="form-group">
+                <label>Group Chat ID:</label>
+                <input type="text" id="groupChatId" class="id-input" placeholder="1234567890">
+                <small style="color:#666;">Group ke messages open karke URL se ID nikalo</small>
+            </div>
+            <div class="form-group">
+                <label>Admin User ID:</label>
+                <input type="text" id="adminUserId" class="id-input" placeholder="9876543210">
+                <small style="color:#666;">Apna user ID (sirf tumhare commands chalenge)</small>
+            </div>
+            <button class="btn btn-success" onclick="setGroupAdmin()" style="margin-top:10px;">✅ Save Settings</button>
+            <div id="groupStatus" class="status offline" style="font-size:12px;">Not configured</div>
+            <div class="commands">
+                <strong>👑 Admin Commands:</strong><br>
+                /start - Bot activate<br>
+                /stats - Statistics<br>
+                /reply hello Namaste - Auto reply add<br>
+                /stop - Pause bot
+            </div>
         </div>
 
         <div class="card">
@@ -251,7 +332,7 @@ DASHBOARD_HTML = '''
             </div>
             <div class="form-group">
                 <label>Reply Message</label>
-                <textarea id="replyMsg" placeholder="Namaste! Kaise ho? ❤️">Namaste! Kaise ho? ❤️</textarea>
+                <textarea id="replyMsg" placeholder="Namaste bhai! ❤️">Namaste bhai! ❤️</textarea>
             </div>
             <button class="btn btn-primary" onclick="addAutoReply()">➕ Add Reply</button>
         </div>
@@ -265,32 +346,40 @@ DASHBOARD_HTML = '''
     <script>
         function toggleBot(currentStatus) {
             const action = currentStatus ? 'stop' : 'start';
-            fetch(`/bot/${action}`)
-                .then(r => r.json())
-                .then(data => location.reload());
+            fetch(`/bot/${action}`).then(r => r.json()).then(data => location.reload());
         }
 
         function setToken() {
             const token = document.getElementById('tokenInput').value.trim();
-            if (!token) {
-                alert('❌ Token enter karo!');
-                return;
-            }
+            if (!token) { alert('❌ Token enter karo!'); return; }
             
             fetch('/set_token', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({token: token})
-            })
-            .then(r => r.json())
-            .then(data => {
+            }).then(r => r.json()).then(data => {
                 if (data.success) {
-                    document.getElementById('tokenStatus').innerHTML = '✅ Token set successfully!';
+                    document.getElementById('tokenStatus').innerHTML = '✅ Token set!';
                     document.getElementById('tokenStatus').className = 'status online';
-                    alert('🎉 Token set ho gaya! Bot restart karo.');
+                    alert('🎉 Token set! Restart bot.');
                 } else {
-                    alert('❌ Token invalid: ' + data.error);
+                    alert('❌ ' + data.error);
                 }
+            });
+        }
+
+        function setGroupAdmin() {
+            const groupId = document.getElementById('groupChatId').value.trim();
+            const adminId = document.getElementById('adminUserId').value.trim();
+            
+            fetch('/config/group_admin', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({group_id: groupId, admin_id: adminId})
+            }).then(r => r.json()).then(data => {
+                document.getElementById('groupStatus').innerHTML = '✅ Group & Admin set!';
+                document.getElementById('groupStatus').className = 'status online';
+                alert('🎉 Settings saved!');
             });
         }
 
@@ -306,7 +395,6 @@ DASHBOARD_HTML = '''
         function addAutoReply() {
             const trigger = document.getElementById('triggerWord').value;
             const reply = document.getElementById('replyMsg').value;
-            
             fetch('/config/add_reply', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -331,6 +419,7 @@ DASHBOARD_HTML = '''
 @app.route('/')
 def dashboard():
     load_stats()
+    load_group_config()
     logs_html = '<br>'.join(LOGS[-20:])
     session_status = "Connected" if SESSION_LOADED else "Disconnected"
     bot_status = BOT_THREAD and BOT_THREAD.is_alive() if BOT_THREAD else False
@@ -345,38 +434,41 @@ def dashboard():
 
 @app.route('/logs')
 def get_logs():
-    return render_template_string('<br>'.join(LOGS[-50:]))
+    return '<br>'.join(LOGS[-50:])
 
 @app.route('/set_token', methods=['POST'])
 def api_set_token():
     try:
         data = request.json
         token = data.get('token', '').strip()
-        
-        if not token:
-            return jsonify({"success": False, "error": "No token provided"})
-        
         cl.login_by_sessionid(token)
         cl.dump_settings(SESSION_FILE)
-        
         with open(TOKEN_FILE, 'w') as f:
             f.write(token)
-            
         global SESSION_LOADED
         SESSION_LOADED = True
-        
-        log(f"✅ Token set successfully: {token[:20]}...")
+        log(f"✅ Token set: {token[:20]}...")
         return jsonify({"success": True})
     except Exception as e:
-        log(f"❌ Token failed: {str(e)}")
+        log(f"❌ Token error: {str(e)}")
         return jsonify({"success": False, "error": str(e)})
+
+@app.route('/config/group_admin', methods=['POST'])
+def api_set_group_admin():
+    global GROUP_CHAT_ID, ADMIN_USER_ID
+    data = request.json
+    GROUP_CHAT_ID = data.get('group_id')
+    ADMIN_USER_ID = data.get('admin_user_id')
+    save_group_config()
+    log(f"👥 Group: {GROUP_CHAT_ID}, Admin: {ADMIN_USER_ID}")
+    return jsonify({"success": True})
 
 @app.route('/bot/start', methods=['POST'])
 def api_start_bot():
-    if load_session():
+    if load_session() and GROUP_CHAT_ID and ADMIN_USER_ID:
         start_bot()
         return jsonify({"status": "started"})
-    return jsonify({"status": "error", "message": "Login first"})
+    return jsonify({"status": "error", "message": "Complete setup first"})
 
 @app.route('/bot/stop', methods=['POST'])
 def api_stop_bot():
@@ -387,7 +479,7 @@ def api_stop_bot():
 def api_toggle_auto_reply():
     data = request.json
     BOT_CONFIG["auto_reply_active"] = data.get('active', False)
-    log(f"🔄 Auto reply {'enabled' if BOT_CONFIG['auto_reply_active'] else 'disabled'}")
+    log(f"🔄 Auto reply {'ON' if BOT_CONFIG['auto_reply_active'] else 'OFF'}")
     return jsonify({"status": "updated"})
 
 @app.route('/config/add_reply', methods=['POST'])
@@ -395,15 +487,14 @@ def api_add_reply():
     data = request.json
     trigger = data.get('trigger', '').lower().strip()
     reply = data.get('reply', '').strip()
-    
     if trigger and reply:
         BOT_CONFIG["auto_replies"][trigger] = reply
-        log(f"➕ Added reply for '{trigger}' -> '{reply[:50]}...'")
-    
+        log(f"➕ Reply: '{trigger}' → '{reply[:30]}...'")
     return jsonify({"status": "added"})
 
 if __name__ == '__main__':
     load_session()
     load_stats()
-    log("🚀 Instagram Bot Dashboard starting on http://0.0.0.0:5000")
+    load_group_config()
+    log("🚀 Instagram Group Bot Dashboard - http://0.0.0.0:5000")
     app.run(host='0.0.0.0', port=5000, debug=False)
