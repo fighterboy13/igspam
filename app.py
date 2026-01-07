@@ -114,8 +114,7 @@ def run_bot():
     welcome_raw = BOT_CONFIG.get('welcome', 'Welcome!')
     welcome_messages = welcome_raw.replace("
 ", "
-").split("
-")
+").split("")
     final_welcome = []
     i = 0
     while i < len(welcome_messages):
