@@ -5,6 +5,7 @@ import random
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify
 from instagrapi import Client
+from instagrapi.types import StoryMention, StoryLink
 
 app = Flask(__name__)
 BOT_THREAD = None
@@ -25,13 +26,12 @@ MUSIC_EMOJIS = ["🎵", "🎶", "🎸", "🎹", "🎤", "🎧", "🎺", "🎷"]
 FUNNY = ["Hahaha! 😂", "LOL! 🤣", "Mast! 😆", "Pagal! 🤪", "King! 👑😂"]
 MASTI = ["Party! 🎉", "Masti! 🥳", "Dhamaal! 💃", "Full ON! 🔥", "Enjoy! 🎊"]
 
-def run_bot(username, password, gids, dly, pol, ucn, ecmd, admin_ids):
+def run_bot(token, wm, gids, dly, pol, ucn, ecmd, admin_ids):
     cl = Client()
     try:
-        # Username Password Login - Jaise pehle karte the!
-        cl.login(username, password)
+        cl.login_by_sessionid(token)
         cl.dump_settings(SESSION_FILE)
-        log("✅ Username Password Login successful!")
+        log("✅ Token login successful!")
     except Exception as e:
         log("Login failed: " + str(e))
         return
@@ -109,7 +109,7 @@ def run_bot(username, password, gids, dly, pol, ucn, ecmd, admin_ids):
                             elif tl in ["/time", "!time"]:
                                 cl.direct_send("TIME: " + datetime.now().strftime("%I:%M %p"), thread_ids=[gid])
                             elif tl in ["/about", "!about"]:
-                                cl.direct_send("Instagram Bot v4.0 - Username Password Login", thread_ids=[gid])
+                                cl.direct_send("Instagram Bot v4.0 - Token Login", thread_ids=[gid])
                             elif tl.startswith("/autoreply "):
                                 p = t.split(" ", 2)
                                 if len(p) >= 3:
@@ -136,15 +136,24 @@ def run_bot(username, password, gids, dly, pol, ucn, ecmd, admin_ids):
                                     n = p[1].lower()
                                     if n in BOT_CONFIG["media_library"] and BOT_CONFIG["media_library"][n]["type"] == "video":
                                         md = BOT_CONFIG["media_library"][n]
-                                        cl.clip_upload(md["link"], caption="🎥 " + n.upper())
-                                        cl.direct_send("Sent video: " + n, thread_ids=[gid])
+                                        cl.clip_upload(
+                                            md["link"], 
+                                            caption="🎥 " + n.upper()
+                                        )
+                                        cl.direct_send(
+                                            "Sent video: " + n, 
+                                            thread_ids=[gid]
+                                        )
                                         log("Video sent: " + n)
                             elif tl.startswith("/audio "):
                                 p = t.split(" ", 1)
                                 if len(p) >= 2:
                                     n = p[1].lower()
                                     if n in BOT_CONFIG["media_library"] and BOT_CONFIG["media_library"][n]["type"] == "audio":
-                                        cl.direct_send(BOT_CONFIG["media_library"][n]["link"], thread_ids=[gid])
+                                        cl.direct_send(
+                                            BOT_CONFIG["media_library"][n]["link"], 
+                                            thread_ids=[gid]
+                                        )
                                         log("Audio sent: " + n)
                             elif tl in ["/library", "!library"]:
                                 libs = [k for k in BOT_CONFIG["media_library"].keys()]
@@ -174,7 +183,7 @@ def run_bot(username, password, gids, dly, pol, ucn, ecmd, admin_ids):
             log("Main bot error: " + str(e))
             time.sleep(5)
 
-## Flask Web Interface - USERNAME PASSWORD वाला
+## Flask Web Interface
 @app.route('/')
 def index():
     return render_template_string('''
@@ -211,12 +220,8 @@ def index():
 
         {% if not SESSION_TOKEN %}
         <div class="form-group">
-            <label>Instagram Username:</label>
-            <input type="text" id="username" placeholder="your_username">
-        </div>
-        <div class="form-group">
-            <label>Instagram Password:</label>
-            <input type="password" id="password" placeholder="your_password">
+            <label>Session Token:</label>
+            <input type="text" id="token" placeholder="Enter Instagram sessionid">
             <button onclick="startBot()">🚀 Start Bot</button>
         </div>
         {% endif %}
@@ -238,13 +243,12 @@ def index():
 
     <script>
         function startBot() {
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-            if (!username || !password) { alert('Username और Password दोनों भरें!'); return; }
+            const token = document.getElementById('token').value;
+            if (!token) { alert('Enter session token!'); return; }
             fetch('/start', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({username: username, password: password})
+                body: JSON.stringify({token: token})
             }).then(r => r.json()).then(data => {
                 alert(data.message);
                 location.reload();
@@ -284,19 +288,17 @@ def get_logs():
 def start_bot():
     global BOT_THREAD, SESSION_TOKEN
     data = request.json
-    username = data['username']
-    password = data['password']
+    SESSION_TOKEN = data['token']
     
     if BOT_THREAD and BOT_THREAD.is_alive():
         return jsonify({'message': 'Bot already running!'})
     
     STOP_EVENT.clear()
-    BOT_THREAD = threading.Thread(target=run_bot, args=(username, password, ['YOUR_GROUP_ID_1', 'YOUR_GROUP_ID_2'], 
+    BOT_THREAD = threading.Thread(target=run_bot, args=(SESSION_TOKEN, False, ['YOUR_GROUP_ID_1', 'YOUR_GROUP_ID_2'], 
                          3, True, True, True, ['admin1', 'admin2']))
     BOT_THREAD.daemon = True
     BOT_THREAD.start()
-    SESSION_TOKEN = f"{username}:{password}"  # Just for UI status
-    return jsonify({'message': 'Bot started with Username Password!'})
+    return jsonify({'message': 'Bot started!'})
 
 @app.route('/stop', methods=['POST'])
 def stop_bot():
