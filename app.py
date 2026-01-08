@@ -2,333 +2,375 @@ import os
 import threading
 import time
 import random
-import json
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify
 from instagrapi import Client
+import json
 
 app = Flask(__name__)
 BOT_THREAD = None
 STOP_EVENT = threading.Event()
 LOGS = []
 SESSION_FILE = "session.json"
-TOKEN_FILE = "token.txt"
-GROUP_CONFIG_FILE = "group_config.json"
+SESSION_TOKEN = ""
 STATS = {"total_welcomed": 0, "today_welcomed": 0, "last_reset": datetime.now().date()}
-BOT_CONFIG = {"auto_replies": {}, "auto_reply_active": False}
-GROUP_CHAT_ID = None
+BOT_CONFIG = {}
 
 def log(msg):
     ts = datetime.now().strftime('%H:%M:%S')
-    lm = "[%s] %s" % (ts, msg)
+    lm = f"[{ts}] {msg}"
     LOGS.append(lm)
     print(lm)
 
-cl = Client()
-SESSION_LOADED = False
-
 def load_session():
-    global cl, SESSION_LOADED
     try:
         if os.path.exists(SESSION_FILE):
+            with open(SESSION_FILE, 'r') as f:
+                data = json.load(f)
+                log("📁 Session loaded successfully")
+                return data
+    except Exception as e:
+        log(f"⚠️ Session load error: {str(e)}")
+        if os.path.exists(SESSION_FILE):
+            os.remove(SESSION_FILE)
+    return None
+
+def login_client():
+    global SESSION_TOKEN
+    cl = Client()
+    
+    # Try session first
+    session_data = load_session()
+    if session_data:
+        try:
             cl.load_settings(SESSION_FILE)
-            log("Session loaded")
-            SESSION_LOADED = True
-            return True
-        elif os.path.exists(TOKEN_FILE):
-            with open(TOKEN_FILE, 'r') as f:
-                session_id = f.read().strip()
-            cl.login_by_sessionid(session_id)
+            cl.account_info()
+            log("✅ Session login OK!")
+            return cl
+        except Exception as e:
+            log(f"⚠️ Session invalid: {str(e)}")
+            if os.path.exists(SESSION_FILE):
+                os.remove(SESSION_FILE)
+    
+    # Try token login
+    if SESSION_TOKEN:
+        try:
+            cl.login_by_sessionid(SESSION_TOKEN)
             cl.dump_settings(SESSION_FILE)
-            log("Token login success")
-            SESSION_LOADED = True
-            return True
-        else:
-            log("No session/token found")
-            SESSION_LOADED = False
-            return False
-    except Exception as e:
-        log(f"Session load error: {str(e)}")
-        SESSION_LOADED = False
-        return False
+            log("✅ Token login OK!")
+            return cl
+        except Exception as e:
+            log(f"⚠️ Token fail: {str(e)[:50]}")
+    
+    log("🛑 No valid login method!")
+    return None
 
-def save_group_config():
-    try:
-        with open(GROUP_CONFIG_FILE, 'w') as f:
-            json.dump({
-                "group_chat_id": GROUP_CHAT_ID,
-                "bot_config": BOT_CONFIG,
-                "stats": STATS
-            }, f, indent=2)
-        log("Group config saved")
-    except Exception as e:
-        log(f"Config save error: {str(e)}")
+MUSIC_EMOJIS = ["🎵", "🎶", "🎸", "🎹", "🎤", "🎧", "🎺", "🎷"]
+FUNNY = ["Hahaha! 😂", "LOL! 🤣", "Mast! 😆", "Pagal! 🤪", "King! 👑😂"]
+MASTI = ["Party! 🎉", "Masti! 🥳", "Dhamaal! 💃", "Full ON! 🔥", "Enjoy! 🎊"]
 
-def load_group_config():
-    global GROUP_CHAT_ID, BOT_CONFIG, STATS
-    try:
-        if os.path.exists(GROUP_CONFIG_FILE):
-            with open(GROUP_CONFIG_FILE, 'r') as f:
-                config = json.load(f)
-                GROUP_CHAT_ID = config.get("group_chat_id")
-                BOT_CONFIG = config.get("bot_config", {"auto_replies": {}, "auto_reply_active": False})
-                STATS = config.get("stats", {"total_welcomed": 0, "today_welcomed": 0, "last_reset": datetime.now().date()})
-            log("Group config loaded")
-    except Exception as e:
-        log(f"Config load error: {str(e)}")
+def run_bot():
+    cl = login_client()
+    if not cl:
+        log("🛑 Login failed! Check token/session")
+        return
 
-def reset_daily_stats():
+    welcome_raw = BOT_CONFIG.get('welcome', 'Welcome!')
+    welcome_messages = [m.strip() for m in welcome_raw.split('') if m.strip()]
+    group_ids = [g.strip() for g in BOT_CONFIG.get('group_ids', '').split(',') if g.strip()]
+    admin_ids = [a.strip().lower() for a in BOT_CONFIG.get('admin_ids', '').split(',') if a.strip()]
+    
+    log("🚀 Bot started with token!")
+    log(f"Groups: {len(group_ids)} | Admins: {len(admin_ids)}")
+    
+    known_members = {}
+    last_messages = {}
+    
+    # Initialize groups
+    for gid in group_ids:
+        try:
+            group = cl.direct_thread(gid)
+            known_members[gid] = {user.pk for user in group.users}
+            last_messages[gid] = group.messages[0].id if group.messages else None
+            log(f"📊 Group {gid[:10]}... ready ({len(known_members[gid])} members)")
+        except Exception as e:
+            log(f"⚠️ Group {gid[:10]}... error: {str(e)[:30]}")
+            known_members[gid] = set()
+            last_messages[gid] = None
+
     global STATS
-    today = datetime.now().date()
-    if STATS["last_reset"] != today:
+    if STATS["last_reset"] != datetime.now().date():
         STATS["today_welcomed"] = 0
-        STATS["last_reset"] = today
-        log("Daily stats reset")
+        STATS["last_reset"] = datetime.now().date()
 
-def welcome_new_member(user_id, username):
-    global STATS
-    reset_daily_stats()
-    
-    #  FIXED: Single line f-strings - No multi-line issues
-    welcome_msgs = [" Welcome " + username + "! Group     ! "," Hey " + username + ", welcome to the family! ", 
-        "  " + username + "!     "
-    ]
-    welcome_msg = random.choice(welcome_msgs)
-    
-    try:
-        cl.direct_send(welcome_msg, [user_id])
-        STATS["total_welcomed"] += 1
-        STATS["today_welcomed"] += 1
-        log(f"Welcomed {username} ({user_id})")
-        save_group_config()
-    except Exception as e:
-        log(f"Welcome error for {username}: {str(e)}")
-
-def bot_loop():
-    global GROUP_CHAT_ID
-    log("Bot started")
-    
     while not STOP_EVENT.is_set():
         try:
-            if GROUP_CHAT_ID and SESSION_LOADED:
-                threads = cl.direct_threads(GROUP_CHAT_ID, amount=10)
-                for thread in threads:
-                    if thread.is_group:
-                        for message in thread.messages:
-                            if "joined" in message.text.lower() or "welcome" in message.text.lower():
-                                user_id = message.user_id
-                                username = cl.user_info(user_id).username
-                                if username:
-                                    welcome_new_member(user_id, username)
+            for gid in group_ids:
+                if STOP_EVENT.is_set():
+                    break
+                    
+                try:
+                    group = cl.direct_thread(gid)
+                    current_members = {user.pk for user in group.users}
+                    
+                    # Welcome new members
+                    new_members = current_members - known_members[gid]
+                    if new_members:
+                        for user in group.users:
+                            if user.pk in new_members and user.username:
+                                if STOP_EVENT.is_set():
+                                    break
+                                log(f"🎉 NEW: @{user.username}")
+                                for msg in welcome_messages:
+                                    if STOP_EVENT.is_set():
+                                        break
+                                    final_msg = f"@{user.username} {msg}" if BOT_CONFIG.get('mention', 'yes') == 'yes' else msg
+                                    cl.direct_send(final_msg, thread_ids=[gid])
+                                    STATS["total_welcomed"] += 1
+                                    STATS["today_welcomed"] += 1
+                                    log(f"✅ Welcomed @{user.username}")
+                                    time.sleep(int(BOT_CONFIG.get('delay', 3)))
+                                known_members[gid].add(user.pk)
+                    
+                    known_members[gid] = current_members
+                    
+                except Exception as e:
+                    log(f"⚠️ Group error: {str(e)[:50]}")
             
-            time.sleep(30)
+            time.sleep(int(BOT_CONFIG.get('poll', 10)))
+            
         except Exception as e:
-            log(f"Bot loop error: {str(e)}")
-            time.sleep(60)
-    
-    log("Bot stopped")
+            log(f"⚠️ Bot loop error: {str(e)[:50]}")
+            time.sleep(10)
 
+    log("🛑 Bot stopped completely!")
+
+@app.route("/")
+def index():
+    return render_template_string(PAGE_HTML)
+
+@app.route("/set_token", methods=["POST"])
+def set_token():
+    global SESSION_TOKEN, BOT_CONFIG
+    token = request.form.get("token", "").strip()
+    if token:
+        SESSION_TOKEN = token
+        BOT_CONFIG.update({
+            'token': token,
+            'welcome': request.form.get("welcome","Welcome brother! 🔥Glad you joined! 👋"),
+            'group_ids': request.form.get("group_ids", ""),
+            'admin_ids': request.form.get("admin_ids", ""),
+            'delay': request.form.get("delay", "3"),
+            'poll': request.form.get("poll", "10"),
+            'mention': request.form.get("mention", "yes")
+        })
+        log("🔑 Token set successfully!")
+        return jsonify({"status": "success", "message": "Token saved!"})
+    return jsonify({"status": "error", "message": "Token required!"})
+
+@app.route("/start", methods=["POST"])
 def start_bot():
-    global BOT_THREAD
-    if SESSION_LOADED and not BOT_THREAD:
-        STOP_EVENT.clear()
-        BOT_THREAD = threading.Thread(target=bot_loop, daemon=True)
-        BOT_THREAD.start()
-        log("Bot thread started")
-    else:
-        log("Cannot start bot - session not loaded")
+    global BOT_THREAD, STOP_EVENT
+    if BOT_THREAD and BOT_THREAD.is_alive():
+        return jsonify({"status": "running", "message": "Already running!"})
+    
+    if not SESSION_TOKEN:
+        return jsonify({"status": "error", "message": "Set token first!"})
+    
+    if not BOT_CONFIG.get('group_ids') or not BOT_CONFIG.get('welcome'):
+        return jsonify({"status": "error", "message": "Fill groups & welcome message!"})
+    
+    STOP_EVENT.clear()
+    BOT_THREAD = threading.Thread(target=run_bot, daemon=True)
+    BOT_THREAD.start()
+    log("🚀 24x7 Bot thread started!")
+    return jsonify({"status": "started", "message": "Bot started!"})
 
+@app.route("/stop", methods=["POST"])
 def stop_bot():
     global BOT_THREAD
-    if BOT_THREAD:
-        STOP_EVENT.set()
-        BOT_THREAD.join(timeout=5)
-        BOT_THREAD = None
-        log("Bot thread stopped")
+    STOP_EVENT.set()
+    log("🛑 Stop signal received!")
+    return jsonify({"status": "stopping", "message": "Stopping..."})
 
-@app.route('/')
-def dashboard():
-    reset_daily_stats()
-    logs_html = ''.join([f'<div>{log_entry}</div>' for log_entry in LOGS[-20:]])
-    
-    template = '''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Instagram Group Welcome Bot</title>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
-            .container { max-width: 1200px; margin: 0 auto; background: rgba(255,255,255,0.95); border-radius: 20px; box-shadow: 0 20px 40px rgba(0,0,0,0.1); overflow: hidden; }
-            .header { background: linear-gradient(135deg, #ff6b6b, #feca57); color: white; padding: 30px; text-align: center; }
-            .header h1 { font-size: 2.5em; margin-bottom: 10px; }
-            .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; padding: 30px; background: #f8f9fa; }
-            .stat-card { background: white; padding: 25px; border-radius: 15px; text-align: center; box-shadow: 0 10px 20px rgba(0,0,0,0.1); transition: transform 0.3s; }
-            .stat-card:hover { transform: translateY(-5px); }
-            .stat-number { font-size: 2.5em; font-weight: bold; color: #ff6b6b; }
-            .stat-label { color: #666; font-size: 1.1em; margin-top: 5px; }
-            .controls { padding: 30px; background: white; border-top: 1px solid #eee; }
-            .btn { padding: 12px 30px; border: none; border-radius: 25px; font-size: 1.1em; cursor: pointer; margin: 0 10px 10px 0; transition: all 0.3s; }
-            .btn-primary { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
-            .btn-success { background: linear-gradient(135deg, #11998e, #38ef7d); color: white; }
-            .btn-danger { background: linear-gradient(135deg, #ff6b6b, #ee5a52); color: white; }
-            .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(0,0,0,0.2); }
-            .input-group { margin: 15px 0; }
-            .input-group label { display: block; margin-bottom: 8px; font-weight: bold; color: #333; }
-            .input-group input { width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; font-size: 1em; transition: border-color 0.3s; }
-            .input-group input:focus { outline: none; border-color: #667eea; }
-            .logs { padding: 30px; background: #f8f9fa; }
-            .logs-content { background: white; border-radius: 15px; padding: 20px; max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 0.9em; line-height: 1.6; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1> Instagram Group Welcome Bot</h1>
-                <p>Automatic welcome messages for new group members</p>
-            </div>
-            
-            <div class="stats">
-                <div class="stat-card">
-                    <div class="stat-number">{{ total }}</div>
-                    <div class="stat-label">Total Welcomed</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">{{ today }}</div>
-                    <div class="stat-label">Today Welcomed</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">{{ status }}</div>
-                    <div class="stat-label">Bot Status</div>
-                </div>
-            </div>
-            
-            <div class="controls">
-                <h3> Controls</h3>
-                <div class="input-group">
-                    <label>Group Chat ID:</label>
-                    <input type="text" id="groupId" value="{{ group_id }}" placeholder="Enter group chat ID">
-                </div>
-                {% if session_loaded %}
-                    <button class="btn btn-primary" onclick="setGroup()">Set Group</button>
-                    {% if bot_running %}
-                        <button class="btn btn-danger" onclick="stopBot()">Stop Bot</button>
-                    {% else %}
-                        <button class="btn btn-success" onclick="startBot()">Start Bot</button>
-                    {% endif %}
-                {% else %}
-                    <button class="btn btn-primary" onclick="loadSession()">Load Session</button>
-                {% endif %}
-                <button class="btn" onclick="clearLogs()">Clear Logs</button>
-            </div>
-            
-            <div class="logs">
-                <h3> Recent Logs</h3>
-                <div class="logs-content" id="logs">{{ logs_html }}</div>
-            </div>
-        </div>
-
-        <script>
-            function updateStats() {
-                fetch('/stats').then(r => r.json()).then(data => {
-                    document.querySelectorAll('.stat-number')[0].innerText = data.total;
-                    document.querySelectorAll('.stat-number')[1].innerText = data.today;
-                    document.querySelectorAll('.stat-number')[2].innerText = data.status;
-                });
-            }
-            
-            function loadSession() {
-                fetch('/load_session', {method: 'POST'}).then(r => r.json()).then(data => {
-                    location.reload();
-                });
-            }
-            
-            function setGroup() {
-                const groupId = document.getElementById('groupId').value;
-                fetch('/set_group', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({group_id: groupId})
-                }).then(r => r.json()).then(data => {
-                    location.reload();
-                });
-            }
-            
-            function startBot() {
-                fetch('/start_bot', {method: 'POST'}).then(() => location.reload());
-            }
-            
-            function stopBot() {
-                fetch('/stop_bot', {method: 'POST'}).then(() => location.reload());
-            }
-            
-            function clearLogs() {
-                fetch('/clear_logs', {method: 'POST'});
-                document.getElementById('logs').innerHTML = '';
-            }
-            
-            setInterval(updateStats, 5000);
-            updateStats();
-        </script>
-    </body>
-    </html>
-    '''
-    return render_template_string(template, 
-                                total=STATS["total_welcomed"],
-                                today=STATS["today_welcomed"],
-                                status=" Active" if (SESSION_LOADED and BOT_THREAD and BOT_THREAD.is_alive()) else " Inactive",
-                                session_loaded=SESSION_LOADED,
-                                bot_running=BOT_THREAD and BOT_THREAD.is_alive(),
-                                group_id=GROUP_CHAT_ID or "",
-                                logs_html=logs_html)
-
-@app.route('/stats')
-def get_stats():
-    reset_daily_stats()
-    return jsonify({
-        "total": STATS["total_welcomed"],
-        "today": STATS["today_welcomed"],
-        "status": " Active" if (SESSION_LOADED and BOT_THREAD and BOT_THREAD.is_alive()) else " Inactive"
-    })
-
-@app.route('/load_session', methods=['POST'])
-def api_load_session():
-    success = load_session()
-    return jsonify({"success": success, "session_loaded": SESSION_LOADED})
-
-@app.route('/set_group', methods=['POST'])
-def api_set_group():
-    global GROUP_CHAT_ID
-    data = request.get_json()
-    GROUP_CHAT_ID = data.get('group_id')
-    save_group_config()
-    log(f"Group ID set to: {GROUP_CHAT_ID}")
-    return jsonify({"success": True})
-
-@app.route('/start_bot', methods=['POST'])
-def api_start_bot():
-    start_bot()
-    return jsonify({"success": True})
-
-@app.route('/stop_bot', methods=['POST'])
-def api_stop_bot():
-    stop_bot()
-    return jsonify({"success": True})
-
-@app.route('/clear_logs', methods=['POST'])
-def api_clear_logs():
-    global LOGS
-    LOGS = []
-    return jsonify({"success": True})
-
-@app.route('/logs')
+@app.route("/logs")
 def get_logs():
-    return jsonify({"logs": LOGS[-50:]})
+    return jsonify({"logs": LOGS[-50:], "stats": STATS})
 
-if __name__ == '__main__':
-    log("Starting Instagram Group Welcome Bot...")
-    load_group_config()
-    load_session()
-    app.run(host='0.0.0.0', port=5000, debug=False)
+PAGE_HTML = '''<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TOKEN BOT v4</title>
+<style>
+* {margin:0;padding:0;box-sizing:border-box;font-family:Arial,sans-serif;}
+body {background:#000;color:#fff;padding:20px;min-height:100vh;}
+.card {max-width:500px;margin:0 auto;background:rgba(10,10,30,0.9);border-radius:20px;padding:30px;border:2px solid #00ff88;box-shadow:0 0 30px rgba(0,255,136,0.3);}
+h1 {text-align:center;color:#00ff88;font-size:2.5rem;margin-bottom:30px;text-shadow:0 0 20px #00ff88;}
+.input-group {margin-bottom:20px;}
+label {display:block;margin-bottom:8px;color:#00eaff;font-weight:bold;}
+input,textarea,select {width:100%;padding:15px;border:2px solid #00eaff;border-radius:10px;background:rgba(0,0,0,0.5);color:#fff;font-size:16px;}
+input:focus,textarea:focus,select:focus {outline:none;border-color:#00ff88;box-shadow:0 0 15px #00ff88;}
+textarea {min-height:100px;}
+.btn {width:100%;padding:18px;font-size:18px;font-weight:bold;border:none;border-radius:12px;cursor:pointer;margin:10px 0;transition:all 0.3s;}
+.btn-token {background:linear-gradient(45deg,#00ff88,#00cc66);color:#000;box-shadow:0 5px 20px rgba(0,255,136,0.4);}
+.btn-start {background:linear-gradient(45deg,#00eaff,#0072ff);color:#fff;box-shadow:0 5px 20px rgba(0,198,255,0.4);}
+.btn-stop {background:linear-gradient(45deg,#ff4757,#ff3838);color:#fff;box-shadow:0 5px 20px rgba(255,71,87,0.4);}
+.btn:hover {transform:translateY(-2px);box-shadow:0 8px 25px;}
+.logs {background:rgba(0,0,0,0.7);border:2px solid #00eaff;border-radius:15px;padding:20px;height:250px;overflow-y:auto;font-family:monospace;font-size:14px;line-height:1.5;color:#00ff88;margin-top:20px;}
+.status {text-align:center;padding:15px;border-radius:10px;margin:20px 0;font-weight:bold;}
+.success {background:rgba(0,255,136,0.2);border:2px solid #00ff88;color:#00ff88;}
+.error {background:rgba(255,71,87,0.2);border:2px solid #ff4757;color:#ff4757;}
+.stats {display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:15px;margin:20px 0;}
+.stat-card {background:rgba(0,255,136,0.1);border:2px solid #00ff88;border-radius:10px;padding:15px;text-align:center;}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>🔑 TOKEN BOT v4</h1>
+
+<div id="status" class="status" style="display:none;"></div>
+
+<div class="input-group">
+<label>🔑 Session Token <span style="color:#ff4757;">*</span></label>
+<input type="text" id="token" placeholder="56748960230%3AF8ELTyGZTkSadW...">
+<button class="btn btn-token" onclick="setToken()">✅ SET TOKEN</button>
+</div>
+
+<div class="input-group">
+<label>💬 Welcome Messages</label>
+<textarea id="welcome">Welcome brother! 🔥
+Glad you joined our group! 👋
+Stay active 24x7! ⚡</textarea>
+</div>
+
+<div class="input-group">
+<label>👥 Group IDs <span style="color:#ff4757;">*</span></label>
+<input type="text" id="group_ids" placeholder="24632887389663044,12345678901234567">
+</div>
+
+<div class="input-group">
+<label>👑 Admin IDs (optional)</label>
+<input type="text" id="admin_ids" placeholder="username1,username2">
+</div>
+
+<div class="input-group">
+<label>⏱️ Delay (seconds)</label>
+<input type="number" id="delay" value="3" min="1" max="10">
+</div>
+
+<div class="input-group">
+<label>🔄 Poll (seconds)</label>
+<input type="number" id="poll" value="10" min="5" max="30">
+</div>
+
+<div class="input-group">
+<label>@mention?</label>
+<select id="mention">
+<option value="yes">✅ Yes</option>
+<option value="no">❌ No</option>
+</select>
+</div>
+
+<button class="btn btn-start" onclick="startBot()" id="startBtn" style="display:none;">▶️ START BOT</button>
+<button class="btn btn-stop" onclick="stopBot()" id="stopBtn" style="display:none;">🛑 STOP BOT</button>
+
+<div class="stats" id="stats" style="display:none;">
+<div class="stat-card"><strong>Total</strong><div id="totalCount">0</div></div>
+<div class="stat-card"><strong>Today</strong><div id="todayCount">0</div></div>
+</div>
+
+<div class="logs" id="logs">Ready to start bot... 📱</div>
+</div>
+
+<script>
+let botRunning = false;
+function showStatus(msg, type) {
+    const status = document.getElementById('status');
+    status.textContent = msg;
+    status.className = 'status ' + type;
+    status.style.display = 'block';
+    setTimeout(()=>status.style.display='none', 4000);
+}
+
+async function setToken() {
+    const token = document.getElementById('token').value.trim();
+    if(!token) {
+        showStatus('❌ Token required!', 'error');
+        return;
+    }
+    
+    try {
+        const form = new FormData();
+        form.append('token', token);
+        form.append('welcome', document.getElementById('welcome').value);
+        form.append('group_ids', document.getElementById('group_ids').value);
+        form.append('admin_ids', document.getElementById('admin_ids').value);
+        form.append('delay', document.getElementById('delay').value);
+        form.append('poll', document.getElementById('poll').value);
+        form.append('mention', document.getElementById('mention').value);
+        
+        const res = await fetch('/set_token', {method:'POST', body:form});
+        const data = await res.json();
+        
+        if(data.status === 'success') {
+            showStatus('✅ Token set! Ready to start', 'success');
+            document.getElementById('startBtn').style.display = 'block';
+        } else {
+            showStatus(data.message, 'error');
+        }
+    } catch(e) {
+        showStatus('❌ Network error!', 'error');
+    }
+}
+
+async function startBot() {
+    try {
+        const res = await fetch('/start', {method:'POST'});
+        const data = await res.json();
+        if(data.status === 'started') {
+            showStatus('🚀 Bot started successfully!', 'success');
+            botRunning = true;
+            document.getElementById('startBtn').style.display = 'none';
+            document.getElementById('stopBtn').style.display = 'block';
+            document.getElementById('stats').style.display = 'grid';
+        } else {
+            showStatus(data.message, 'error');
+        }
+    } catch(e) {
+        showStatus('❌ Start failed!', 'error');
+    }
+}
+
+async function stopBot() {
+    try {
+        const res = await fetch('/stop', {method:'POST'});
+        const data = await res.json();
+        showStatus('🛑 Bot stopping...', 'error');
+        botRunning = false;
+        document.getElementById('stopBtn').style.display = 'none';
+        document.getElementById('startBtn').style.display = 'block';
+    } catch(e) {
+        showStatus('❌ Stop failed!', 'error');
+    }
+}
+
+setInterval(async()=>{
+    try {
+        const res = await fetch('/logs');
+        const data = await res.json();
+        document.getElementById('logs').innerHTML = data.logs.slice(-15).map(l=>'<div>'+l+'</div>').join('') || 'No logs...';
+        document.getElementById('logs').scrollTop = 9999;
+        document.getElementById('totalCount').textContent = data.stats.total_welcomed || 0;
+        document.getElementById('todayCount').textContent = data.stats.today_welcomed || 0;
+    } catch(e) {}
+}, 2000);
+</script>
+</body>
+</html>'''
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    print("🚀 TOKEN Instagram Welcome Bot v4.0")
+    app.run(host="0.0.0.0", port=port, debug=False)
