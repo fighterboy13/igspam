@@ -136,8 +136,8 @@ def run_bot(session_token, wm, gids, dly, pol, ucn, ecmd, admin_ids):
 
                         elif tl in ["/uptime","!uptime"]:
                             cl.direct_send(f"Uptime: {uptime()}", thread_ids=[gid])
-
-                        if tl in ["/about", "!about"]:
+    
+    if tl in ["/about", "!about"]:
     cl.direct_send(
         "Instagram Premium Bot v4.0",
         thread_ids=[gid]
@@ -152,8 +152,6 @@ elif tl.startswith("/autoreply "):
 elif tl in ["/stopreply", "!stopreply"]:
     BOT_CONFIG["auto_reply_active"] = False
     BOT_CONFIG["auto_replies"] = {}
-    
-                                           
                         elif tl in ["/music","!music"]:
                             cl.direct_send(" ".join(random.choices(MUSIC_EMOJIS,k=5)), thread_ids=[gid])
 
