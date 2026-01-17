@@ -163,7 +163,7 @@ def run_bot(session_token, wm, gids, dly, pol, ucn, ecmd, admin_ids):
                             if len(p)==3:
                                 BOT_CONFIG["target_spam"][gid] = {
                                     "username": p[1].replace("@",""),
-                                    "message": p[[2]  }
+                                    "message": p[[2]}
                                
                                 BOT_CONFIG["spam_active"][gid] = True
 
