@@ -159,17 +159,17 @@ def run_bot(session_token, wm, gids, dly, pol, ucn, ecmd, admin_ids):
                             cl.direct_send(random.choice(MASTI), thread_ids=[gid])
 
                         elif ia and tl.startswith("/spam "):
-                            p = t.split(" ",2)
-                            if len(p)==3:
-                                BOT_CONFIG["target_spam"][gid] = {
-                                    "username": p[1].replace("@",""),
-                                    "message": p[[2]}
-                               
-                                BOT_CONFIG["spam_active"][gid] = True
+    p = t.split(" ", 2)
+    if len(p) == 3:
+        BOT_CONFIG["target_spam"][gid] = {
+            "username": p[1].replace("@", ""),
+            "message": p[2]  # ← यहाँ [2] सही है, [[2]] नहीं!
+        }
+        BOT_CONFIG["spam_active"][gid] = True
 
-                        elif ia and tl in ["/stopspam","!stopspam"]:
-                            BOT_CONFIG["spam_active"][gid] = False
-
+elif ia and tl in ["/stopspam", "!stopspam"]:
+    # stopspam logic यहाँ add करो
+    pass
                     if g.messages:
                         lm[gid] = g.messages[0].id
 
