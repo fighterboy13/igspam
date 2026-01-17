@@ -29,7 +29,7 @@ BOT_CONFIG = {
 
 def uptime():
     if not START_TIME:
-        return "Bot inactive"
+        return "00:00:00"
     delta = datetime.now() - START_TIME
     hours, rem = divmod(int(delta.total_seconds()), 3600)
     minutes, seconds = divmod(rem, 60)
@@ -120,12 +120,19 @@ def run_bot(session_token, wm, gids, dly, pol, ucn, ecmd, admin_ids):
 
                         if tl in ["/help","!help"]:
                             cl.direct_send(
-                                "COMMANDS:"
-                                "/help /ping /time /about /uptime"
-                                "/stats /count /welcome"
-                                "/autoreply key msg/stopreply"
-                                "/music /funny /masti"
-                                "/spam @user msg/stopspam",
+                                "COMMANDS:
+"
+                                "/help /ping /time /about /uptime
+"
+                                "/stats /count /welcome
+"
+                                "/autoreply key msg
+/stopreply
+"
+                                "/music /funny /masti
+"
+                                "/spam @user msg
+/stopspam",
                                 thread_ids=[gid]
                             )
 
@@ -139,7 +146,10 @@ def run_bot(session_token, wm, gids, dly, pol, ucn, ecmd, admin_ids):
                             cl.direct_send(f"Uptime: {uptime()}", thread_ids=[gid])
 
                         elif tl in ["/about","!about"]:
-                            cl.direct_send(f"Instagram Premium Bot v4.0Uptime: {uptime()}", thread_ids=[gid])elif tl.startswith("/autoreply "):
+                            cl.direct_send(f"Instagram Premium Bot v4.0
+Uptime: {uptime()}", thread_ids=[gid])
+
+                        elif tl.startswith("/autoreply "):
                             p = t.split(" ",2)
                             if len(p)==3:
                                 BOT_CONFIG["auto_replies"][p[1].lower()] = p[2]
@@ -159,17 +169,17 @@ def run_bot(session_token, wm, gids, dly, pol, ucn, ecmd, admin_ids):
                             cl.direct_send(random.choice(MASTI), thread_ids=[gid])
 
                         elif ia and tl.startswith("/spam "):
-    p = t.split(" ", 2)
-    if len(p) == 3:
-        BOT_CONFIG["target_spam"][gid] = {
-            "username": p[1].replace("@", ""),
-            "message": p[2]  # ← यहाँ [2] सही है, [[2]] नहीं!
-        }
-        BOT_CONFIG["spam_active"][gid] = True
+                            p = t.split(" ",2)
+                            if len(p)==3:
+                                BOT_CONFIG["target_spam"][gid] = {
+                                    "username": p[1].replace("@",""),
+                                    "message": p[2]
+                                }
+                                BOT_CONFIG["spam_active"][gid] = True
 
-elif ia and tl in ["/stopspam", "!stopspam"]:
-    # stopspam logic यहाँ add करो
-    pass
+                        elif ia and tl in ["/stopspam","!stopspam"]:
+                            BOT_CONFIG["spam_active"][gid] = False
+
                     if g.messages:
                         lm[gid] = g.messages[0].id
 
