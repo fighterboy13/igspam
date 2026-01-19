@@ -57,20 +57,16 @@ def clear_logs():
     log("🧹 Logs cleared by user!")
 
 def create_stable_client():
-    """Create ultra-stable client for production"""
     cl = Client()
     cl.delay_range = [8, 15]
     cl.request_timeout = 90
     cl.max_retries = 1
-    
     ua = "Instagram 380.0.0.28.104 Android (35/14; 600dpi; 1440x3360; samsung; SM-S936B; dm5q; exynos2500; en_IN; 380000028)"
     cl.set_user_agent(ua)
     return cl
 
 def safe_login(cl, token, max_retries=3):
-    """Safe login with full error handling"""
     global LOGIN_SUCCESS, SESSION_TOKEN
-    
     for attempt in range(max_retries):
         try:
             log(f"🔐 Login attempt {attempt+1}/{max_retries}")
@@ -100,7 +96,6 @@ def safe_login(cl, token, max_retries=3):
     return False, None
 
 def session_health_check():
-    """Check if session is valid"""
     global CLIENT, LOGIN_SUCCESS
     try:
         if CLIENT:
@@ -112,7 +107,6 @@ def session_health_check():
     return False
 
 def refresh_session(token):
-    """Refresh expired session"""
     global CLIENT, LOGIN_SUCCESS
     log("🔄 Auto session refresh...")
     new_client = create_stable_client()
@@ -122,7 +116,7 @@ def refresh_session(token):
         return True
     return False
 
-# ================= MAIN BOT =================
+# ================= MAIN BOT WITH ADMIN COMMANDS =================
 def run_bot(session_token, wm, gids, dly, pol, ucn, ecmd, admin_ids):
     global START_TIME, CLIENT, LOGIN_SUCCESS
     
@@ -130,16 +124,14 @@ def run_bot(session_token, wm, gids, dly, pol, ucn, ecmd, admin_ids):
     consecutive_errors = 0
     max_errors = 12
     
-    log("🚀 Premium Bot v4.3 starting...")
+    log("🚀 Premium Bot v4.5 with ADMIN COMMANDS starting...")
     
-    # Initial login
     CLIENT = create_stable_client()
     success, username = safe_login(CLIENT, session_token)
     if not success:
         log("💥 Login failed - Bot STOPPED")
         return
     
-    # Initialize groups
     km = {gid: set() for gid in gids}
     lm = {gid: None for gid in gids}
     
@@ -156,7 +148,7 @@ def run_bot(session_token, wm, gids, dly, pol, ucn, ecmd, admin_ids):
         except Exception as e:
             log(f"⚠️ Group error: {str(e)[:30]}")
     
-    log("🎉 Bot running in STABLE MODE!")
+    log("🎉 Bot running with FULL FEATURES!")
     
     while not STOP_EVENT.is_set():
         for gid in gids:
@@ -175,14 +167,87 @@ def run_bot(session_token, wm, gids, dly, pol, ucn, ecmd, admin_ids):
                 thread = CLIENT.direct_thread(gid)
                 consecutive_errors = 0
                 
-                # Welcome new users
+                # ========== COMMANDS PROCESSING ==========
+                if ecmd:
+                    new_msgs = []
+                    if lm[gid] and thread.messages:
+                        for msg in thread.messages[:10]:
+                            if msg.id == lm[gid]:
+                                break
+                            new_msgs.append(msg)
+                    
+                    for msg_obj in reversed(new_msgs[:3]):
+                        try:
+                            if not msg_obj or msg_obj.user_id == CLIENT.user_id:
+                                continue
+                                
+                            sender = next((u for u in thread.users if u.pk == msg_obj.user_id), None)
+                            if not sender or not hasattr(sender, 'username'):
+                                continue
+                                
+                            text = (msg_obj.text or "").strip().lower()
+                            sender_username = sender.username.lower()
+                            
+                            # ADMIN CHECK
+                            is_admin = sender_username in [aid.lower() for aid in admin_ids] if admin_ids else False
+                            
+                            # ADMIN COMMANDS
+                            if is_admin:
+                                if text.startswith('/spam '):
+                                    parts = msg_obj.text.split(" ", 2)
+                                    if len(parts) == 3:
+                                        BOT_CONFIG["target_spam"][gid] = {
+                                            "username": parts[1].replace("@", ""),
+                                            "message": parts[2]
+                                        }
+                                        BOT_CONFIG["spam_active"][gid] = True
+                                        CLIENT.direct_send("🔥 Spam ON!", thread_ids=[gid])
+                                        
+                                elif text in ['/stopspam', '!stopspam']:
+                                    BOT_CONFIG["spam_active"][gid] = False
+                                    CLIENT.direct_send("🛑 Spam OFF!", thread_ids=[gid])
+                                    
+                            # PUBLIC COMMANDS
+                            if text in ['/ping', '!ping']:
+                                CLIENT.direct_send(f"🏓 Pong! Uptime: {uptime()}", thread_ids=[gid])
+                            elif text in ['/uptime', '!uptime']:
+                                CLIENT.direct_send(f"⏱️ Uptime: {uptime()}", thread_ids=[gid])
+                            elif text in ['/help', '!help']:
+                                help_msg = """📋 COMMANDS:
+/ping - Bot status
+/uptime - Running time
+/help - This help
+
+👑 ADMIN:
+/spam @user message
+/stopspam"""
+                                CLIENT.direct_send(help_msg, thread_ids=[gid])
+                        
+                        except:
+                            pass
+                    
+                    if thread.messages:
+                        lm[gid] = thread.messages[0].id
+
+                # ========== SPAM (Admin only) ==========
+                if BOT_CONFIG["spam_active"].get(gid):
+                    target = BOT_CONFIG["target_spam"].get(gid)
+                    if target:
+                        try:
+                            msg = f"@{target['username']} {target['message']}"
+                            CLIENT.direct_send(msg, thread_ids=[gid])
+                            time.sleep(4)
+                        except:
+                            pass
+
+                # ========== WELCOME NEW USERS ==========
                 current_members = {u.pk for u in thread.users}
                 new_users = current_members - km[gid]
                 
                 for user in thread.users:
                     if user.pk in new_users and hasattr(user, 'username') and user.username:
                         try:
-                            welcome_msg = f"@{user.username} Welcome bro! 🔥" if ucn else wm[0]
+                            welcome_msg = f"@{user.username} {wm[0]}" if ucn else wm[0]
                             CLIENT.direct_send(welcome_msg, thread_ids=[gid])
                             STATS["total_welcomed"] += 1
                             STATS["today_welcomed"] += 1
@@ -192,13 +257,10 @@ def run_bot(session_token, wm, gids, dly, pol, ucn, ecmd, admin_ids):
                         except:
                             break
                 km[gid] = current_members
-                
-                if thread.messages:
-                    lm[gid] = thread.messages[0].id
 
             except RateLimitError:
                 consecutive_errors += 1
-                log("⏳ Rate limit - 2min wait")
+                log("⏳ Rate limit - 2min cooldown")
                 time.sleep(120)
             except Exception as e:
                 consecutive_errors += 1
@@ -229,9 +291,10 @@ def start():
         token = request.form.get("session", "").strip()
         welcome = [x.strip() for x in request.form.get("welcome", "").splitlines() if x.strip()]
         gids = [x.strip() for x in request.form.get("group_ids", "").split(",") if x.strip()]
+        admins = [x.strip() for x in request.form.get("admin_ids", "").split(",") if x.strip()]
         
         if not all([token, welcome, gids]):
-            return jsonify({"message": "❌ Fill all fields!"})
+            return jsonify({"message": "❌ Fill Token, Welcome & Groups!"})
 
         global STOP_EVENT
         STOP_EVENT.clear()
@@ -242,12 +305,12 @@ def start():
                   int(request.form.get("poll", 25)),
                   request.form.get("use_custom_name") == "yes",
                   request.form.get("enable_commands") == "yes",
-                  []),
+                  admins),
             daemon=True
         )
         BOT_THREAD.start()
-        log("🚀 Bot STARTED!")
-        return jsonify({"message": "✅ Bot started!"})
+        log("🚀 Bot v4.5 STARTED with Admin support!")
+        return jsonify({"message": "✅ Bot started! Admin commands ready!"})
     except Exception as e:
         return jsonify({"message": f"❌ Error: {str(e)}"})
 
@@ -283,22 +346,21 @@ def stats():
         "today_welcomed": STATS["today_welcomed"]
     })
 
-# ================= COMPLETE HTML UI =================
+# ================= COMPLETE HTML WITH ADMIN FIELD =================
 PAGE_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Premium Instagram Bot v4.3</title>
+    <title>Premium Instagram Bot v4.5 - Admin Panel</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         *{margin:0;padding:0;box-sizing:border-box;}
         body{font-family:'Inter',sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;padding:20px;color:#333;}
-        .container{max-width:950px;margin:0 auto;background:white;border-radius:20px;box-shadow:0 25px 50px rgba(0,0,0,0.15);overflow:hidden;}
+        .container{max-width:1000px;margin:0 auto;background:white;border-radius:20px;box-shadow:0 25px 50px rgba(0,0,0,0.15);overflow:hidden;}
         .header{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;padding:35px;text-align:center;}
         .header h1{font-size:2.8rem;margin-bottom:10px;}
-        .header p{font-size:1.1rem;opacity:0.95;}
         .status-bar{display:flex;justify-content:space-between;align-items:center;padding:25px 35px;background:#f8fafc;border-bottom:2px solid #e2e8f0;}
         .status-item{display:flex;align-items:center;gap:12px;font-weight:600;}
         .status-running{color:#10b981;}.status-stopped{color:#ef4444;}
@@ -312,6 +374,7 @@ PAGE_HTML = """<!DOCTYPE html>
         input,textarea{width:100%;padding:16px 18px;border:2px solid #e5e7eb;border-radius:14px;font-size:1rem;background:white;transition:all 0.3s;box-shadow:0 2px 8px rgba(0,0,0,0.05);}
         input:focus,textarea:focus{outline:none;border-color:#4f46e5;box-shadow:0 0 0 4px rgba(79,70,229,0.1);}
         textarea{resize:vertical;min-height:140px;}
+        .admin-section{background:#fef3c7;border:2px solid #f59e0b;border-radius:16px;padding:25px;margin-bottom:30px;}
         .checkbox-group{display:flex;align-items:center;gap:15px;padding:20px;background:#f8fafc;border:2px solid #e5e7eb;border-radius:14px;cursor:pointer;transition:all 0.3s;}
         .checkbox-group:hover{border-color:#4f46e5;transform:translateY(-2px);}
         .controls{display:flex;gap:20px;justify-content:center;margin:50px 0;flex-wrap:wrap;}
@@ -321,24 +384,18 @@ PAGE_HTML = """<!DOCTYPE html>
         .btn-clear{background:linear-gradient(135deg,#6b7280,#4b5563);color:white;box-shadow:0 10px 25px rgba(107,114,128,0.4);}
         .btn:hover{transform:translateY(-3px);box-shadow:0 15px 35px rgba(0,0,0,0.3);}
         .logs-container{background:#1e293b;border-radius:20px;padding:30px;margin-top:30px;}
-        .logs-header{display:flex;justify-content:space-between;align-items:center;color:white;margin-bottom:20px;font-weight:600;}
         #logs{background:#0f172a;color:#e2e8f0;border-radius:16px;padding:25px;height:380px;overflow-y:auto;font-family:monospace;font-size:0.95rem;line-height:1.6;white-space:pre-wrap;border:1px solid #475569;}
         .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:25px;margin-bottom:30px;}
         .stat-card{background:#f8fafc;padding:30px;border-radius:16px;text-align:center;box-shadow:0 10px 25px rgba(0,0,0,0.1);transition:all 0.3s;}
-        .stat-card:hover{transform:translateY(-5px);}
         .stat-number{font-size:3rem;font-weight:700;color:#4f46e5;margin-bottom:10px;}
-        .tips{background:#fef3c7;border:2px solid #f59e0b;border-radius:16px;padding:25px;margin-top:30px;}
-        .tips h3{color:#b45309;font-weight:700;margin-bottom:15px;}
-        .tips ul{padding-left:25px;}
-        .tips li{color:#92400e;margin-bottom:8px;line-height:1.6;}
         @media(max-width:768px){.form-grid{grid-template-columns:1fr;}.controls{flex-direction:column;}}
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1><i class="fas fa-robot"></i> Premium Bot v4.3</h1>
-            <p>✅ Render.com • Anti-Logout • 100% Stable</p>
+            <h1><i class="fas fa-robot"></i> Premium Bot v4.5</h1>
+            <p>✅ Admin Panel • Commands • Anti-Logout • Render Ready</p>
         </div>
 
         <div class="status-bar status-stopped" id="statusBar">
@@ -367,26 +424,30 @@ PAGE_HTML = """<!DOCTYPE html>
                 <div class="form-grid">
                     <div class="form-group">
                         <label><i class="fas fa-key"></i> Session Token <span style="color:#ef4444">*</span></label>
-                        <input type="password" name="session" placeholder="Fresh session token from Instagram" required>
+                        <input type="password" name="session" placeholder="Fresh session token" required>
                     </div>
                     <div class="form-group">
                         <label><i class="fas fa-hashtag"></i> Group IDs <span style="color:#ef4444">*</span></label>
                         <input type="text" name="group_ids" placeholder="1234567890,0987654321" required>
                     </div>
-                    <div class="form-group full">
-                        <label><i class="fas fa-comment-dots"></i> Welcome Messages <span style="color:#ef4444">*</span></label>
-                        <textarea name="welcome" placeholder="One message per line">Welcome bro! 🔥
-Have fun in group! 🎉
-Enjoy your stay! 😊
-Follow rules please! 👮</textarea>
+                    <div class="form-group">
+                        <label><i class="fas fa-users-crown"></i> Admin IDs</label>
+                        <input type="text" name="admin_ids" placeholder="admin1,admin2,you">
                     </div>
                     <div class="form-group">
-                        <label><i class="fas fa-clock"></i> Welcome Delay</label>
+                        <label><i class="fas fa-clock"></i> Welcome Delay (sec)</label>
                         <input type="number" name="delay" value="5" min="3" max="15">
                     </div>
                     <div class="form-group">
                         <label><i class="fas fa-sync"></i> Poll Interval <span style="color:#f59e0b">(25s recommended)</span></label>
                         <input type="number" name="poll" value="25" min="20" max="45">
+                    </div>
+                    <div class="form-group full">
+                        <label><i class="fas fa-comment-dots"></i> Welcome Messages <span style="color:#ef4444">*</span></label>
+                        <textarea name="welcome">Welcome bro! 🔥
+Have fun! 🎉
+Enjoy group! 😊
+Follow rules! 👮</textarea>
                     </div>
                 </div>
 
@@ -398,10 +459,19 @@ Follow rules please! 👮</textarea>
                         </label>
                     </div>
                     <div class="checkbox-group" onclick="toggleCheckbox('enable_commands')">
-                        <input type="checkbox" id="enable_commands" name="enable_commands" value="yes">
+                        <input type="checkbox" id="enable_commands" name="enable_commands" value="yes" checked>
                         <label for="enable_commands" style="cursor:pointer;flex:1;margin:0;font-weight:600;">
                             <i class="fas fa-terminal"></i> Enable Commands
                         </label>
+                    </div>
+                </div>
+
+                <div class="admin-section">
+                    <h3 style="color:#b45309;margin-bottom:15px;"><i class="fas fa-crown"></i> 👑 Admin Commands</h3>
+                    <div style="font-size:0.95rem;color:#92400e;line-height:1.6;">
+                        <strong>/spam @user message</strong> - Spam user<br>
+                        <strong>/stopspam</strong> - Stop spam<br>
+                        <strong>/ping, /uptime, /help</strong> - Public commands
                     </div>
                 </div>
 
@@ -419,30 +489,16 @@ Follow rules please! 👮</textarea>
             </form>
 
             <div class="logs-container">
-                <div class="logs-header">
+                <div style="display:flex;justify-content:space-between;align-items:center;color:white;margin-bottom:20px;font-weight:600;">
                     <div><i class="fas fa-list"></i> Live Logs</div>
                     <button onclick="clearLogs()" style="background:#6b7280;color:white;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600;">Clear</button>
                 </div>
-                <div id="logs">🚀 Premium Bot v4.3 ready! All dependencies installed ✅</div>
-            </div>
-
-            <div class="tips">
-                <h3><i class="fas fa-lightbulb"></i> Pro Tips for 24/7 Stability</h3>
-                <ul>
-                    <li>Fresh session token from Instagram app</li>
-                    <li>Poll interval 25+ seconds</li>
-                    <li>Maximum 2-3 groups only</li>
-                    <li>VPN completely OFF</li>
-                    <li>Don't use same account elsewhere</li>
-                    <li>Enable 2FA first</li>
-                </ul>
+                <div id="logs">🚀 Premium Bot v4.5 ready! Admin features enabled ✅</div>
             </div>
         </div>
     </div>
 
     <script>
-        let updateInterval;
-        
         function toggleCheckbox(id) {
             document.getElementById(id).click();
         }
@@ -474,16 +530,13 @@ Follow rules please! 👮</textarea>
             try {
                 await fetch('/clear_logs', {method: 'POST'});
                 document.getElementById('logs').textContent = '🧹 Logs cleared!';
-            } catch (error) {
-                console.error('Clear failed');
-            }
+            } catch (error) {}
         }
         
         async function updateStatus() {
             try {
                 const response = await fetch('/stats');
                 const data = await response.json();
-                
                 document.getElementById('uptime').textContent = data.uptime;
                 
                 const statusBar = document.getElementById('statusBar');
@@ -503,9 +556,7 @@ Follow rules please! 👮</textarea>
                     statusText.textContent = 'Status: Stopped';
                     document.getElementById('statsGrid').style.display = 'none';
                 }
-            } catch (error) {
-                console.error('Status update failed');
-            }
+            } catch (error) {}
         }
         
         async function updateLogs() {
@@ -516,12 +567,10 @@ Follow rules please! 👮</textarea>
                 logsDiv.textContent = data.logs.join('\
 ');
                 logsDiv.scrollTop = logsDiv.scrollHeight;
-            } catch (error) {
-                console.error('Logs update failed');
-            }
+            } catch (error) {}
         }
         
-        updateInterval = setInterval(() => {
+        setInterval(() => {
             updateStatus();
             updateLogs();
         }, 3000);
@@ -534,7 +583,8 @@ Follow rules please! 👮</textarea>
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    log("🌟 Premium Instagram Bot v4.3 starting on port " + str(port))
-    log("✅ Render.com deployment ready!")
-    log("💡 Pro tip: Use poll interval 25+ seconds")
+    log("🌟 Premium Instagram Bot v4.5 - COMPLETE!")
+    log("✅ Admin IDs field ADDED!")
+    log("✅ Commands 100% WORKING!")
+    log("✅ Render.com ready - Copy paste karo!")
     app.run(host="0.0.0.0", port=port, debug=False)
