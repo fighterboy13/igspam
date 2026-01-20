@@ -3,7 +3,6 @@ from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify
 from instagrapi import Client
 from instagrapi.exceptions import ClientError
-import asyncio
 
 app = Flask(__name__)
 
@@ -16,63 +15,32 @@ AUTO_REPLY = False
 SPAM_ACTIVE = False
 RULES_MSG = "No spam, no adult content, respect all members!"
 WELCOME_MSG = "Welcome bro! 🔥 Join the fun! 🎉"
-ADMIN_USERS = ["your_username"]  # Add your username
+ADMIN_USERS = ["your_username"]  # Add your username here
 STATS = {"total": 0, "today": 0, "commands": 0}
+START_TIME = time.time()
 
 def log(msg):
     ts = datetime.now().strftime('%H:%M:%S')
     LOGS.append(f"[{ts}] {msg}")
     print(f"[{ts}] {msg}")
-    if len(LOGS) > 200: LOGS[:] = LOGS[-200:]
+    if len(LOGS) > 200: 
+        LOGS[:] = LOGS[-200:]
 
 # ================= 19 COMMAND SYSTEM =================
-COMMANDS = {
-    # BASIC
-    'ping': '🏓 Pong! Ultra fast response!',
-    'stats': f'📊 Total: {STATS["total"]} | Today: {STATS["today"]} | Commands: {STATS["commands"]}',
-    'count': f'🔢 Bot uptime: {int(time.time()-START_TIME)}s',
-    'time': datetime.now().strftime('%H:%M:%S IST'),
-    'about': '🚀 Premium Bot v5.0 - 19 Commands • Ultra Fast • Anti-Ban',
-    'welcome': WELCOME_MSG,
-    
-    # ADMIN
-    'kick': '👢 Only real admins can kick!',
-    'spam': '🔥 Spam mode requires /addspam first!',
-    'stopspam': '🛑 Spam stopped!',
-    
-    # MEDIA
-    'library': '📚 Library empty! Use /addvideo /addaudio',
-    'video': '🎥 No videos! Use /addvideo',
-    'audio': '🎵 No audios! Use /addaudio',
-    'music': '🎶 Music library empty!',
-    'funny': '😂 No funny content!',
-    'masti': '😜 No masti content!',
-    
-    # AUTO-REPLY
-    'autoreply': '🤖 Auto-reply ON!',
-    'stopreply': '⏹️ Auto-reply OFF!',
-    
-    # RULES
-    'rules': RULES_MSG
-}
-
 def execute_command(cmd, sender_username, thread_id):
     cmd_lower = cmd.strip().lower()
-    
-    # ADMIN CHECK
     is_admin = sender_username.lower() in [u.lower() for u in ADMIN_USERS]
-    
     global AUTO_REPLY, SPAM_ACTIVE, STATS
     
     if cmd_lower == '/autoreply':
         AUTO_REPLY = True
         STATS["commands"] += 1
-        return COMMANDS['autoreply']
+        return "🤖 Auto-reply ON!"
     
     elif cmd_lower == '/stopreply':
         AUTO_REPLY = False
         STATS["commands"] += 1
-        return COMMANDS['stopreply']
+        return "⏹️ Auto-reply OFF!"
     
     elif cmd_lower == '/spam' and is_admin:
         SPAM_ACTIVE = True
@@ -82,12 +50,12 @@ def execute_command(cmd, sender_username, thread_id):
     elif cmd_lower == '/stopspam':
         SPAM_ACTIVE = False
         STATS["commands"] += 1
-        return COMMANDS['stopspam']
+        return "🛑 Spam stopped!"
     
     elif cmd_lower == '/addvideo':
         MEDIA_LIBRARY["videos"].append("sample_video.mp4")
         STATS["commands"] += 1
-        return f"✅ Video added to library! Total: {len(MEDIA_LIBRARY['videos'])}"
+        return f"✅ Video added! Total: {len(MEDIA_LIBRARY['videos'])}"
     
     elif cmd_lower == '/addaudio':
         MEDIA_LIBRARY["audios"].append("sample_audio.mp3")
@@ -117,21 +85,37 @@ Audios: {len(MEDIA_LIBRARY['audios'])}"
         STATS["commands"] += 1
         return "👢 Kicked spammer! (Demo)"
     
-    # PUBLIC COMMANDS
-    else:
-        if cmd_lower.lstrip('/') in COMMANDS:
-            STATS["commands"] += 1
-            return COMMANDS[cmd_lower.lstrip('/')]
+    elif cmd_lower == '/ping':
+        STATS["commands"] += 1
+        return "🏓 Pong! Ultra fast response!"
+    
+    elif cmd_lower == '/stats':
+        STATS["commands"] += 1
+        return f"📊 Total: {STATS['total']} | Today: {STATS['today']} | Commands: {STATS['commands']}"
+    
+    elif cmd_lower == '/count':
+        STATS["commands"] += 1
+        return f"🔢 Bot uptime: {int(time.time()-START_TIME)}s"
+    
+    elif cmd_lower == '/time':
+        STATS["commands"] += 1
+        return datetime.now().strftime('%H:%M:%S IST')
+    
+    elif cmd_lower == '/about':
+        STATS["commands"] += 1
+        return "🚀 Premium Bot v5.0 - 19 Commands • Ultra Fast • Anti-Ban"
+    
+    elif cmd_lower == '/welcome':
+        STATS["commands"] += 1
+        return WELCOME_MSG
     
     return None
 
-# ================= ULTRA FAST MAIN BOT =================
+# ================= MAIN BOT LOOP =================
 def main_bot_loop(token, group_ids):
-    global CLIENT, BOT_RUNNING, STATS, START_TIME
-    START_TIME = time.time()
-    
+    global CLIENT, BOT_RUNNING, STATS
     CLIENT = Client()
-    CLIENT.delay_range = [1, 2]  # ULTRA FAST
+    CLIENT.delay_range = [1, 2]
     CLIENT.login_by_sessionid(token)
     log("🚀 v5.0 STARTED! 19 COMMANDS ACTIVE!")
     
@@ -142,17 +126,14 @@ def main_bot_loop(token, group_ids):
             for gid in group_ids:
                 thread = CLIENT.direct_thread(gid)
                 
-                # SCAN RECENT MESSAGES (FAST)
                 for msg in thread.messages[:5]:
                     if msg.user_id != CLIENT.user_id and msg.text:
                         cmd_response = execute_command(msg.text, "user", gid)
-                        
                         if cmd_response:
                             CLIENT.direct_send(cmd_response, [gid])
                             STATS["total"] += 1
                             break
                 
-                # NEW MEMBER WELCOME
                 current_users = {u.pk for u in thread.users}
                 new_users = current_users - known_members.get(gid, set())
                 if new_users:
@@ -161,7 +142,7 @@ def main_bot_loop(token, group_ids):
                 
                 known_members[gid] = current_users
             
-            time.sleep(2)  # 2s ULTRA FAST POLL
+            time.sleep(2)
             
         except Exception as e:
             log(f"⚠️ Error: {str(e)[:50]}")
@@ -169,7 +150,43 @@ def main_bot_loop(token, group_ids):
     
     log("🛑 Bot stopped!")
 
-# ================= FLASK ADMIN PANEL =================
+# ================= FLASK ROUTES =================
+@app.route("/")
+def index():
+    return render_template_string(HTML_PANEL)
+
+@app.route("/start", methods=["POST"])
+def start():
+    global BOT_RUNNING
+    data = request.json
+    BOT_RUNNING = True
+    threading.Thread(target=main_bot_loop, args=(data['token'], [gid.strip() for gid in data['groups']]), daemon=True).start()
+    log("✅ ALL 19 COMMANDS STARTED!")
+    return jsonify({"msg": "🚀 v5.0 STARTED! All 19 commands active!"})
+
+@app.route("/stop", methods=["POST"])
+def stop():
+    global BOT_RUNNING
+    BOT_RUNNING = False
+    log("⏹️ Bot stopped by admin")
+    return jsonify({"msg": "✅ Bot stopped successfully!"})
+
+@app.route("/stats")
+def stats():
+    return jsonify({
+        "total": STATS["total"],
+        "commands": STATS["commands"],
+        "speed": "2s",
+        "logs": LOGS
+    })
+
+@app.route("/clear", methods=["POST"])
+def clear_logs():
+    global LOGS
+    LOGS = ["🧹 Logs cleared by admin!"]
+    return jsonify({"msg": "✅ Logs cleared!"})
+
+# ================= COMPLETE HTML PANEL =================
 HTML_PANEL = """<!DOCTYPE html>
 <html><head><title>🚀 v5.0 ALL COMMANDS</title>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width">
@@ -263,43 +280,7 @@ setInterval(updateStats, 2000);
 updateStats();
 </script></body></html>"""
 
-@app.route("/")
-def index(): return render_template_string(HTML_PANEL)
-
-@app.route("/start", methods=["POST"])
-def start():
-    global BOT_RUNNING
-    data = request.json
-    BOT_RUNNING = True
-    threading.Thread(target=main_bot_loop, args=(data['token'], [gid.strip() for gid in data['groups']]), daemon=True).start()
-    log("✅ ALL 19 COMMANDS STARTED!")
-    return jsonify({"msg": "🚀 v5.0 STARTED! All 19 commands active!"})
-
-@app.route("/stop", methods=["POST"])
-def stop():
-    global BOT_RUNNING
-    BOT_RUNNING = False
-    log("⏹️ Bot stopped by admin")
-    return jsonify({"msg": "✅ Bot stopped successfully!"})
-
-@app.route("/stats")
-def stats():
-    return jsonify({
-        "total": STATS["total"],
-        "commands": STATS["commands"],
-        "speed": "2s",
-        "logs": LOGS
-    })
-
-@app.route("/clear", methods=["POST"])
-def clear_logs():
-    global LOGS
-    LOGS = ["🧹 Logs cleared by admin!"]
-    return jsonify({"msg": "✅ Logs cleared!"})
-
 if __name__ == "__main__":
-    global START_TIME
-    START_TIME = time.time()
     log("🌟 PREMIUM BOT v5.0 - ALL 19 COMMANDS!")
-    log("⚡ Ultra fast 2s response time!")
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    log("⚡ FIXED: f-string error resolved!")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
