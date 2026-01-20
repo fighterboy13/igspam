@@ -94,7 +94,7 @@ def execute_command(cmd, sender_username, thread_id):
         return f"✅ Audio added! Total: {len(MEDIA_LIBRARY['audios'])}"
     
     elif cmd_lower == '/library':
-        lib_info = f"📚 LIBRARY:
+        lib_info = f'📚 LIBRARY':
 Videos: {len(MEDIA_LIBRARY['videos'])}
 Audios: {len(MEDIA_LIBRARY['audios'])}
 Funny: {len(MEDIA_LIBRARY['funny'])}
