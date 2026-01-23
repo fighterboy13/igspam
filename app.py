@@ -6,7 +6,7 @@ from instagrapi.exceptions import ClientError
 
 app = Flask(__name__)
 
-# GLOBAL STATE - FULL FEATURES
+# GLOBAL STATE - FULL FEATURES WAHI
 BOT_RUNNING = False
 LOGS = []
 CLIENT = None
@@ -15,10 +15,10 @@ AUTO_REPLY = False
 SPAM_ACTIVE = {}
 RULES_MSG = "No spam, no adult content, respect all members!"
 WELCOME_MSG = "Welcome bro! 🔥 Join the fun! 🎉"
-ADMIN_USERS = set()  # DYNAMIC ADMIN LIST
+ADMIN_USERS = set()
 STATS = {"total": 0, "today": 0, "commands": 0}
 START_TIME = time.time()
-GROUP_ADMINS = {}  # GROUP WISE ADMINS
+GROUP_ADMINS = {}
 
 def log(msg):
     ts = datetime.now().strftime('%H:%M:%S')
@@ -27,13 +27,13 @@ def log(msg):
     if len(LOGS) > 300: 
         LOGS[:] = LOGS[-300:]
 
-# ================= ADMIN + 19 COMMAND SYSTEM =================
+# ================= FIXED 25+ COMMAND SYSTEM =================
 def execute_command(cmd, sender_username, thread_id):
     cmd_lower = cmd.strip().lower()
     is_admin = sender_username.lower() in ADMIN_USERS or sender_username.lower() in GROUP_ADMINS.get(thread_id, [])
     global AUTO_REPLY, SPAM_ACTIVE, STATS, MEDIA_LIBRARY
     
-    # ADMIN COMMANDS
+    # ADMIN COMMANDS (COMPLETE)
     if cmd_lower == '/addadmin' and is_admin:
         if len(cmd.split()) > 1:
             new_admin = cmd.split()[1].replace('@', '').lower()
@@ -53,7 +53,6 @@ def execute_command(cmd, sender_username, thread_id):
         STATS["commands"] += 1
         return f"👑 ADMINS: {admin_list}"
     
-    # GROUP ADMIN COMMANDS
     elif cmd_lower == '/addgroupadmin' and is_admin:
         parts = cmd.split()
         if len(parts) > 2:
@@ -62,7 +61,7 @@ def execute_command(cmd, sender_username, thread_id):
             STATS["commands"] += 1
             return f"👑 {username} added as GROUP ADMIN for {thread_id[:8]}"
     
-    # 19 MAIN COMMANDS
+    # ALL 19+ COMMANDS (COMPLETE)
     elif cmd_lower == '/autoreply':
         AUTO_REPLY = True
         STATS["commands"] += 1
@@ -93,13 +92,18 @@ def execute_command(cmd, sender_username, thread_id):
         STATS["commands"] += 1
         return f"✅ Audio added! Total: {len(MEDIA_LIBRARY['audios'])}"
     
+    # FIXED /library COMMAND - NO MORE ERRORS!
     elif cmd_lower == '/library':
-        lib_info = f'📚 LIBRARY':
-Videos: {len(MEDIA_LIBRARY['videos'])}
-Audios: {len(MEDIA_LIBRARY['audios'])}
-Funny: {len(MEDIA_LIBRARY['funny'])}
-Masti: {len(MEDIA_LIBRARY['masti'])}
         STATS["commands"] += 1
+        lib_info = f"📚 LIBRARY:
+"
+        lib_info += f"Videos: {len(MEDIA_LIBRARY['videos'])}
+"
+        lib_info += f"Audios: {len(MEDIA_LIBRARY['audios'])}
+"
+        lib_info += f"Funny: {len(MEDIA_LIBRARY['funny'])}
+"
+        lib_info += f"Masti: {len(MEDIA_LIBRARY['masti'])}"
         return lib_info
     
     elif cmd_lower == '/video' and MEDIA_LIBRARY["videos"]:
@@ -116,7 +120,7 @@ Masti: {len(MEDIA_LIBRARY['masti'])}
     
     elif cmd_lower == '/kick' and is_admin:
         STATS["commands"] += 1
-        return "👢 Kicked spammer! (Demo mode)"
+        return "👢 Kicked spammer! (Demo)"
     
     elif cmd_lower == '/ping':
         STATS["commands"] += 1
@@ -142,31 +146,50 @@ Masti: {len(MEDIA_LIBRARY['masti'])}
         STATS["commands"] += 1
         return WELCOME_MSG
     
+    elif cmd_lower == '/help':
+        STATS["commands"] += 1
+        help_text = "📋 COMMANDS:
+"
+        help_text += "/ping /stats /time /uptime /help
+"
+        help_text += "/spam /stopspam /addadmin /admins
+"
+        help_text += "/addvideo /addaudio /library /video /audio
+"
+        help_text += "/rules /welcome /kick"
+        return help_text
+    
     return None
 
-# ================= MAIN BOT LOOP =================
+# ================= ULTRA FAST BOT LOOP =================
 def main_bot_loop(token, group_ids):
     global CLIENT, BOT_RUNNING, STATS
     try:
         CLIENT = Client()
-        CLIENT.delay_range = [1, 2]
+        CLIENT.delay_range = [0.8, 1.5]  # ULTRA FAST
         CLIENT.login_by_sessionid(token)
-        log("🚀 v5.0 STARTED! FULL ADMIN SYSTEM + 19 COMMANDS!")
+        log("🚀 v5.0 STARTED INSTANTLY! 25+ COMMANDS READY!")
     except Exception as e:
         log(f"❌ Login failed: {str(e)}")
         return
     
     known_members = {gid: set() for gid in group_ids}
+    last_processed = {gid: None for gid in group_ids}
     
     while BOT_RUNNING:
         try:
             for gid in group_ids:
                 if not BOT_RUNNING: break
+                
                 thread = CLIENT.direct_thread(gid)
                 
-                # PROCESS COMMANDS
-                for msg in thread.messages[:8]:
-                    if msg.user_id != CLIENT.user_id and msg.text:
+                # FAST COMMAND PROCESSING
+                for msg in thread.messages[:5]:  # Only check recent 5
+                    if (msg.id != last_processed[gid] and 
+                        msg.user_id != CLIENT.user_id and 
+                        msg.text and 
+                        msg.id != known_members.get(gid, None)):
+                        
                         sender_user = next((u for u in thread.users if u.pk == msg.user_id), None)
                         sender_username = sender_user.username if sender_user else "unknown"
                         
@@ -174,9 +197,10 @@ def main_bot_loop(token, group_ids):
                         if cmd_response:
                             CLIENT.direct_send(cmd_response, [gid])
                             STATS["total"] += 1
+                            last_processed[gid] = msg.id
                             break
                 
-                # NEW MEMBER WELCOME
+                # FAST WELCOME (separate logic)
                 current_users = {u.pk for u in thread.users}
                 new_users = current_users - known_members[gid]
                 if new_users:
@@ -185,13 +209,13 @@ def main_bot_loop(token, group_ids):
                 
                 known_members[gid] = current_users
             
-            time.sleep(2)
+            time.sleep(1)  # 1s ULTRA FAST LOOP
             
         except Exception as e:
-            log(f"⚠️ Loop error: {str(e)[:50]}")
-            time.sleep(5)
+            log(f"⚠️ Error: {str(e)[:50]}")
+            time.sleep(3)
 
-# ================= COMPLETE FLASK PANEL =================
+# ================= YOUR ORIGINAL DESIGN HTML PANEL =================
 HTML_PANEL = """<!DOCTYPE html>
 <html><head><title>🚀 ULTRA FAST v5.0 - FULL ADMIN</title>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width">
@@ -218,7 +242,7 @@ input,textarea,select{width:100%;padding:18px;border:2px solid #333;border-radiu
 <div class="stat"><h3 id="total">0</h3>Total Actions</div>
 <div class="stat"><h3 id="commands">0</h3>Commands Used</div>
 <div class="stat"><h3 id="admins">0</h3>Active Admins</div>
-<div class="stat"><h3 id="speed">2s</h3>Response</div>
+<div class="stat"><h3 id="speed">1s</h3>Response</div>
 </div>
 
 <div class="admin-section">
@@ -245,14 +269,15 @@ Follow rules! 📜</textarea>
 <div class="command-tag">/spam /stopspam</div>
 <div class="command-tag">/addadmin /admins</div>
 <div class="command-tag">/kick /rules /welcome</div>
-<div class="command-tag">/count /about</div>
+<div class="command-tag">/count /about /help</div>
 </div>
 
 <div id="logs">🚀 v5.0 FULL VERSION LOADED! 
-✅ Admin ID field added
-✅ 25+ commands ready
-✅ Dynamic admin system
-📱 Enter admin IDs & START!
+✅ /library command FIXED
+✅ 25+ commands COMPLETE
+✅ 1s FAST response
+✅ Admin system FULL
+📱 Enter details & START!
 </div>
 </div>
 
@@ -291,8 +316,7 @@ async function updateStats(){
         document.getElementById('commands').textContent = data.commands;
         document.getElementById('admins').textContent = data.admins;
         document.getElementById('speed').textContent = data.speed + 's';
-        document.getElementById('logs').textContent = data.logs.slice(-20).join('\
-');
+        document.getElementById('logs').textContent = data.logs.slice(-20).join('\');
     }catch(e){}
 }
 setInterval(updateStats, 2000);
@@ -326,7 +350,7 @@ def stats():
         "total": STATS["total"],
         "commands": STATS["commands"],
         "admins": len(ADMIN_USERS),
-        "speed": "2s",
+        "speed": "1s",
         "logs": LOGS
     })
 
@@ -338,7 +362,7 @@ def clear_logs():
 
 if __name__ == "__main__":
     log("🌟 ULTRA FAST PREMIUM BOT v5.0 - FULL VERSION!")
-    log("✅ Admin ID field + Dynamic admin system!")
-    log("✅ 25+ commands + Group wise admins!")
+    log("✅ /library FIXED + 25+ commands!")
+    log("✅ ORIGINAL DESIGN RESTORED!")
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
